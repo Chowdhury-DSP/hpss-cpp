@@ -20,8 +20,8 @@ HPSS_Processor init (Params params)
     proc.mask_power = params.mask_power;
 
     proc.arena = new Memory_Arena<> {
-        2 * proc.fft_size * sizeof (complex)
-        + 2 * proc.window_size * sizeof (float)
+        4 * proc.fft_size * sizeof (complex)
+        + 6 * proc.window_size * sizeof (float)
         + (params.kernel_size + 2) * (proc.fft_size / 2 + 8) * sizeof (float)
         + 2 * params.kernel_size * sizeof (float)
         + 2048
@@ -36,6 +36,20 @@ HPSS_Processor init (Params params)
         fft_data = proc.arena->make_span<float> (proc.fft_size / 2 + 1, 32);
         std::fill (fft_data.begin(), fft_data.end(), 0.0f);
     }
+
+    proc.hann_window = proc.arena->make_span<float> (proc.window_size, 32);
+    for (int n = 0; n < proc.window_size; ++n)
+    {
+        const auto sine = std::sin ((float) n * (float) M_PI / (float) proc.window_size);
+        proc.hann_window[n] = sine * sine;
+    }
+
+    proc.window_in = proc.arena->make_span<float> (proc.window_size, 32);
+    std::fill (proc.window_in.begin(), proc.window_in.end(), 0.0f);
+    proc.last_window_harm = proc.arena->make_span<float> (proc.window_size, 32);
+    std::fill (proc.last_window_harm.begin(), proc.last_window_harm.end(), 0.0f);
+    proc.last_window_perc = proc.arena->make_span<float> (proc.window_size, 32);
+    std::fill (proc.last_window_perc.begin(), proc.last_window_perc.end(), 0.0f);
 
     proc.arena_frame = proc.arena->create_frame();
 
@@ -104,11 +118,46 @@ static std::span<complex> apply_spectral_mask (Memory_Arena<>& arena, std::span<
     return spectrum_out;
 }
 
-std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& proc, std::span<const float> window_data)
+static std::span<float> overlap_add (HPSS_Processor& proc, std::span<const float> window, std::span<float> last_window)
+{
+    const auto hop_out = proc.arena->make_span<float> (proc.hop_size, 32);
+    if (proc.hop_size == proc.window_size)
+    {
+        std::copy (window.begin(), window.end(), hop_out.begin());
+    }
+    else if (proc.hop_size == proc.window_size / 2)
+    {
+        for (int n = 0; n < proc.hop_size; ++n)
+        {
+            hop_out[n] = window[n] * proc.hann_window[n];
+            hop_out[n] += last_window[n + proc.hop_size] * proc.hann_window[proc.hop_size - n - 1];
+        }
+
+        std::copy (window.begin(), window.end(), last_window.begin());
+    }
+    else
+    {
+        assert (false); // @TODO!
+    }
+
+    return hop_out;
+}
+
+std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& proc, std::span<const float> hop_data)
 {
     proc.arena->reset_to_frame (proc.arena_frame);
 
-    const auto fft_frame = process_forward_fft (proc, window_data);
+    if (proc.hop_size == proc.window_size)
+    {
+        std::copy (hop_data.begin(), hop_data.end(), proc.window_in.begin());
+    }
+    else
+    {
+        std::copy (proc.window_in.begin() + proc.hop_size, proc.window_in.end(), proc.window_in.begin());
+        std::copy (hop_data.begin(), hop_data.end(), proc.window_in.begin() + (proc.window_size - proc.hop_size));
+    }
+
+    const auto fft_frame = process_forward_fft (proc, proc.window_in);
 
     const auto fft_abs_data = proc.fft_history[proc.fft_history_index];
     proc.fft_history_index = (proc.fft_history_index + 1) % proc.kernel_size;
@@ -161,24 +210,21 @@ std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& pr
         percussive_mask[n] = P_p * denom;
     }
 
-    std::span<float> harmonic_out {};
-    std::span<float> percussive_out {};
+    const auto harmonic_spectrum = apply_spectral_mask (*proc.arena, fft_frame, harmonic_mask);
+    const auto harmonic_out = process_inverse_fft (proc, harmonic_spectrum);
 
-    {
-        const auto _ = proc.arena->create_frame();
-        const auto harmonic_spectrum = apply_spectral_mask (*proc.arena, fft_frame, harmonic_mask);
-        harmonic_out = process_inverse_fft (proc, harmonic_spectrum);
-    }
+    const auto percussive_spectrum = apply_spectral_mask (*proc.arena, fft_frame, percussive_mask);
+    const auto percussive_out = process_inverse_fft (proc, percussive_spectrum);
 
-    {
-        const auto _ = proc.arena->create_frame();
-        const auto percussive_spectrum = apply_spectral_mask (*proc.arena, fft_frame, percussive_mask);
-        percussive_out = process_inverse_fft (proc, percussive_spectrum);
-    }
+    // auto window_out = process_inverse_fft (proc, fft_frame);
+    // const auto hop_out= overlap_add (proc, window_out, proc.last_window_out);
 
-    return { harmonic_out, percussive_out };
+    const auto hop_harmonic = overlap_add (proc, harmonic_out, proc.last_window_harm);
+    const auto hop_percussive = overlap_add (proc, percussive_out, proc.last_window_perc);
+
+    return { hop_harmonic, hop_percussive };
 }
-}// namespace hpss
+} // namespace hpss
 
 #if __clang__
 #pragma GCC diagnostic push

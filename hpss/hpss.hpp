@@ -16,6 +16,9 @@
 #pragma warning(disable : 4100)
 #endif
 
+#if defined(__ARM_NEON__)
+#define PFFFT_ENABLE_NEON
+#endif
 #include "pffft/pffft.h"
 
 #if __clang__
@@ -53,9 +56,14 @@ struct HPSS_Processor
 
     std::span<std::span<float>> fft_history;
     int fft_history_index = 0;
+
+    std::span<float> hann_window;
+    std::span<float> window_in;
+    std::span<float> last_window_harm;
+    std::span<float> last_window_perc;
 };
 
 HPSS_Processor init (Params params);
 void deinit (HPSS_Processor&);
-std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& proc, std::span<const float> window_data);
+std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& proc, std::span<const float> hop_data);
 }

@@ -45,6 +45,7 @@ int main (int argc, char* argv[])
 
     const auto harmonic_signal = wav_io::make_buffer (arena, num_channels, num_samples);
     const auto percussive_signal = wav_io::make_buffer (arena, num_channels, num_samples);
+    const auto sum_signal = wav_io::make_buffer (arena, num_channels, num_samples);
 
     const hpss::Params params
     {
@@ -57,13 +58,19 @@ int main (int argc, char* argv[])
         proc = hpss::init (params);
 
     int sample_count = 0;
-    while (sample_count + params.window_size <= num_samples)
+    while (sample_count + hpss_procs[0].hop_size <= num_samples)
     {
         for (int channel = 0; channel < num_channels; ++channel)
         {
-            const auto window = ref_signal[channel].subspan (sample_count, params.window_size);
+            const auto window = ref_signal[channel].subspan (sample_count, hpss_procs[channel].hop_size);
 
-            hpss::process_window (hpss_procs[channel], window);
+            const auto [harmonic_out, percussive_out] = hpss::process_window (hpss_procs[channel], window);
+
+            std::copy (harmonic_out.begin(), harmonic_out.end(), harmonic_signal[channel].begin() + sample_count);
+            std::copy (percussive_out.begin(), percussive_out.end(), percussive_signal[channel].begin() + sample_count);
+
+            for (int n = sample_count; n < sample_count + hpss_procs[0].hop_size; ++n)
+                sum_signal[channel][n] = harmonic_signal[channel][n] + percussive_signal[channel][n];
         }
 
         sample_count += hpss_procs[0].hop_size;
@@ -72,30 +79,10 @@ int main (int argc, char* argv[])
     for (auto& proc : hpss_procs)
         hpss::deinit (proc);
 
-    // HPSS::HPSS_PARAMS params;
-    // params.sample_rate = fs;
-    // params.debug = true;
-    //
-    // std::vector<std::vector<float>> h_signal;
-    // std::vector<std::vector<float>> p_signal;
-    // std::vector<std::vector<float>> sum_signal;
-    // for(int ch = 0; ch < (int) ref_signal.size(); ++ch)
-    // {
-    //     auto[h_ch, p_ch] = HPSS::hpss(ref_signal[ch], params);
-    //     h_signal.push_back(h_ch);
-    //     p_signal.push_back(p_ch);
-    //
-    //     std::vector<float> sum_ch (h_ch.size(), 0.0f);
-    //     for(int i = 0; i < (int) h_ch.size(); ++i)
-    //         sum_ch[i] = h_ch[i] + p_ch[i];
-    //
-    //     sum_signal.push_back(sum_ch);
-    // }
-
     wav_io::write_file ("ref.wav", ref_signal, sf_info, arena);
-    // WavIO::write_file("harmonic.wav", h_signal, sf_info);
-    // WavIO::write_file("percussive.wav", p_signal, sf_info);
-    // WavIO::write_file("sum.wav", sum_signal, sf_info);
+    wav_io::write_file("harmonic.wav", harmonic_signal, sf_info, arena);
+    wav_io::write_file("percussive.wav", percussive_signal, sf_info, arena);
+    wav_io::write_file("sum.wav", sum_signal, sf_info, arena);
 
     return 0;
 }
