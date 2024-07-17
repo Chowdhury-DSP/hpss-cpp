@@ -26,7 +26,7 @@ HPSS_Processor init (Params params)
     proc.arena = new Memory_Arena<> {
         4 * proc.fft_size * sizeof (complex)
         + 6 * proc.window_size * sizeof (float)
-        + (params.kernel_size + 2) * (proc.fft_size / 2 + 8) * sizeof (float)
+        + 3 * (proc.fft_size / 2 + 8) * sizeof (float)
         + 2 * params.kernel_size * sizeof (float)
         + (proc.fft_size / 2 + 1) * (mediator_size + 16)
         + 2048
@@ -34,13 +34,6 @@ HPSS_Processor init (Params params)
 
     proc.fft_setup = pffft_new_setup (proc.fft_size, PFFFT_COMPLEX);
     proc.fft_io_data = static_cast<float*> (pffft_aligned_malloc (2 * proc.fft_size * sizeof (complex)));
-
-    proc.fft_history = proc.arena->make_span<std::span<float>> (proc.kernel_size);
-    for (auto& fft_data : proc.fft_history)
-    {
-        fft_data = proc.arena->make_span<float> (proc.fft_size / 2 + 1, 32);
-        std::fill (fft_data.begin(), fft_data.end(), 0.0f);
-    }
 
     proc.hann_window = proc.arena->make_span<float> (proc.window_size, 32);
     for (int n = 0; n < proc.window_size; ++n)
@@ -237,9 +230,7 @@ std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& pr
 
     const auto fft_frame = process_forward_fft (proc, proc.window_in);
 
-    const auto fft_abs_data = proc.fft_history[proc.fft_history_index];
-    proc.fft_history_index = (proc.fft_history_index + 1) % proc.kernel_size;
-
+    const auto fft_abs_data = proc.arena->make_span<float> (proc.fft_size / 2 + 1, 32);
     fft_abs_data[0] = fft_frame[0].real();
     fft_abs_data[proc.fft_size / 2] = fft_frame[proc.fft_size / 2].real();
     for (int n = 1; n < proc.fft_size / 2; ++n)
@@ -248,6 +239,7 @@ std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& pr
     const auto percussive_mask = generate_percussive_mask (proc, fft_abs_data);
     const auto harmonic_mask = generate_harmonic_mask (proc, fft_abs_data);
 
+    // @TODO: optimize this loop!
     for (int n = 0; n < proc.fft_size / 2 + 1; ++n)
     {
         static constexpr auto eps = std::numeric_limits<float>::epsilon();

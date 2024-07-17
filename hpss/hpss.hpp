@@ -55,9 +55,6 @@ struct HPSS_Processor
     PFFFT_Setup* fft_setup = nullptr;
     float* fft_io_data = nullptr;
 
-    std::span<std::span<float>> fft_history;
-    int fft_history_index = 0;
-
     std::span<float> hann_window;
     std::span<float> window_in;
     std::span<float> last_window_harm;
