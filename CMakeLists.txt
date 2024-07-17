@@ -4,15 +4,6 @@ project(hpss)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/")
 
-include(CPM)
-CPMAddPackage(
-    NAME libsndfile
-    VERSION 1.0.30
-    GITHUB_REPOSITORY libsndfile/libsndfile
-    OPTIONS
-    "BUILD_PROGRAMS OFF" "BUILD_EXAMPLES OFF" "BUILD_TESTING OFF"
-)
-
 add_library(hpss STATIC)
 target_sources(hpss
     PRIVATE
@@ -21,5 +12,16 @@ target_sources(hpss
 )
 target_include_directories(hpss PUBLIC .)
 
-add_executable(hpss_test test/test.cpp)
-target_link_libraries(hpss_test PRIVATE hpss sndfile)
+option(HPSS_BUILD_TESTS OFF)
+if(HPSS_BUILD_TESTS)
+    include(CPM)
+    CPMAddPackage(
+        NAME libsndfile
+        VERSION 1.0.30
+        GITHUB_REPOSITORY libsndfile/libsndfile
+        OPTIONS
+        "BUILD_PROGRAMS OFF" "BUILD_EXAMPLES OFF" "BUILD_TESTING OFF"
+    )
+    add_executable(hpss_test test/test.cpp)
+    target_link_libraries(hpss_test PRIVATE hpss sndfile)
+endif()
