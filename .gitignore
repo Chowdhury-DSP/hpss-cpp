@@ -5,4 +5,4 @@ cmake-build-*/
 .idea/
 
 *.wav
-
+*.mp3

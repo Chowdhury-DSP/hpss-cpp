@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <span>
 #include <sstream>
@@ -74,6 +75,7 @@ public:
 
         if (bytes_used + bytes_increment > raw_data.size())
         {
+            assert (false);
             return nullptr;
         }
 
@@ -118,17 +120,24 @@ public:
    */
     struct Frame
     {
+        Frame() = default;
         explicit Frame (Memory_Arena& allocator)
-            : alloc (allocator), bytes_used_at_start (alloc.bytes_used) {}
+            : alloc (&allocator), bytes_used_at_start (alloc->bytes_used) {}
 
-        ~Frame() { alloc.bytes_used = bytes_used_at_start; }
+        ~Frame() { alloc->bytes_used = bytes_used_at_start; }
 
-        Memory_Arena& alloc;
-        const size_t bytes_used_at_start;
+        Memory_Arena* alloc = nullptr;
+        size_t bytes_used_at_start = 0;
     };
 
     /** Creates a frame for this allocator */
     auto create_frame() { return Frame { *this }; }
+
+    void reset_to_frame (const Frame& frame)
+    {
+        assert (frame.alloc == this);
+        bytes_used = frame.bytes_used_at_start;
+    }
 
 private:
     MemoryResourceType raw_data {};
