@@ -1,6 +1,8 @@
 #include "hpss/hpss.hpp"
 #include "wav_io.hpp"
 
+#include <chrono>
+
 void help()
 {
     std::cout << "Utility to separate harmonic and percussive signals from a .wav file" << std::endl;
@@ -47,15 +49,17 @@ int main (int argc, char* argv[])
     const auto percussive_signal = wav_io::make_buffer (arena, num_channels, num_samples);
     const auto sum_signal = wav_io::make_buffer (arena, num_channels, num_samples);
 
-    const hpss::Params params
-    {
+    const hpss::Params params {
         .window_size = 1 << 12,
         .hop_factor = 2,
         .zero_pad = 2,
+        .mask_power = 2.0f,
     };
     const auto hpss_procs = arena.make_span<hpss::HPSS_Processor> (num_channels);
     for (auto& proc : hpss_procs)
         proc = hpss::init (params);
+
+    const auto start = std::chrono::high_resolution_clock::now();
 
     int sample_count = 0;
     while (sample_count + hpss_procs[0].hop_size <= num_samples)
@@ -76,13 +80,18 @@ int main (int argc, char* argv[])
         sample_count += hpss_procs[0].hop_size;
     }
 
+    const auto duration = std::chrono::high_resolution_clock::now() - start;
+    const auto duration_seconds = std::chrono::duration<float> (duration).count();
+    std::cout << "Processed " << num_seconds << " seconds of audio in " << duration_seconds << " seconds" << std::endl;
+    std::cout << num_seconds / duration_seconds << "x real-time" << std::endl;
+
     for (auto& proc : hpss_procs)
         hpss::deinit (proc);
 
     wav_io::write_file ("ref.wav", ref_signal, sf_info, arena);
-    wav_io::write_file("harmonic.wav", harmonic_signal, sf_info, arena);
-    wav_io::write_file("percussive.wav", percussive_signal, sf_info, arena);
-    wav_io::write_file("sum.wav", sum_signal, sf_info, arena);
+    wav_io::write_file ("harmonic.wav", harmonic_signal, sf_info, arena);
+    wav_io::write_file ("percussive.wav", percussive_signal, sf_info, arena);
+    wav_io::write_file ("sum.wav", sum_signal, sf_info, arena);
 
     return 0;
 }

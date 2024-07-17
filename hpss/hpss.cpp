@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <complex>
 #include <limits>
+#include <numeric>
+
+#include "util/mediator.h"
 
 namespace hpss
 {
@@ -19,11 +22,13 @@ HPSS_Processor init (Params params)
     proc.kernel_size = params.kernel_size;
     proc.mask_power = params.mask_power;
 
+    const auto mediator_size = MediatorSizeBytes (proc.kernel_size);
     proc.arena = new Memory_Arena<> {
         4 * proc.fft_size * sizeof (complex)
         + 6 * proc.window_size * sizeof (float)
         + (params.kernel_size + 2) * (proc.fft_size / 2 + 8) * sizeof (float)
         + 2 * params.kernel_size * sizeof (float)
+        + (proc.fft_size / 2 + 1) * (mediator_size + 16)
         + 2048
     };
 
@@ -50,6 +55,10 @@ HPSS_Processor init (Params params)
     std::fill (proc.last_window_harm.begin(), proc.last_window_harm.end(), 0.0f);
     proc.last_window_perc = proc.arena->make_span<float> (proc.window_size, 32);
     std::fill (proc.last_window_perc.begin(), proc.last_window_perc.end(), 0.0f);
+
+    proc.horizontal_mediators = proc.arena->make_span<Mediator*> (proc.fft_size / 2 + 1);
+    for (auto& mediator : proc.horizontal_mediators)
+        mediator = MediatorNew (*proc.arena, proc.kernel_size);
 
     proc.arena_frame = proc.arena->create_frame();
 
@@ -101,6 +110,75 @@ static std::span<float> process_inverse_fft (HPSS_Processor& proc, std::span<con
         ifft_out[n] = proc.fft_io_data[n * 2] * norm_gain;
 
     return ifft_out;
+}
+
+static std::span<float> generate_percussive_mask (HPSS_Processor& proc, std::span<const float> fft_abs_data)
+{
+    const auto half_kernel = proc.kernel_size / 2;
+    const auto percussive_mask = proc.arena->make_span<float> (proc.fft_size / 2 + 1, 32);
+
+#if 1
+    const auto frame = proc.arena->create_frame();
+    auto* mediator = MediatorNew (*proc.arena, proc.kernel_size);
+
+    for (int n = 0; n < half_kernel; ++n)
+    {
+        MediatorInsert (mediator, fft_abs_data[n]);
+    }
+
+    int n;
+    for (n = 0; n < proc.fft_size / 2 + 1 - half_kernel; ++n)
+    {
+        MediatorInsert (mediator, fft_abs_data[n + half_kernel]);
+        percussive_mask[n] = MediatorMedian (mediator);
+    }
+
+    for (; n < proc.fft_size / 2 + 1; ++n)
+    {
+        MediatorInsert (mediator, n % 2 ? 0.0f : 10000.0f);
+        percussive_mask[n] = MediatorMedian (mediator);
+    }
+#else
+    for (int n = 0; n < proc.fft_size / 2 + 1; ++n)
+    {
+        const auto start_index = std::max (n - half_kernel, 0);
+        const auto end_index = std::min (n + half_kernel, proc.fft_size / 2) + 1;
+        const auto median_count = end_index - start_index;
+        const auto median_element = median_count / 2;
+
+        const auto _ = proc.arena->create_frame();
+        const auto temp_data = proc.arena->make_span<float> (median_count);
+        std::copy (fft_abs_data.begin() + start_index, fft_abs_data.begin() + start_index + median_count, temp_data.begin());
+
+        std::nth_element (temp_data.begin(), temp_data.begin() + median_element, temp_data.end());
+        percussive_mask[n] = temp_data[median_element];
+    }
+#endif
+    return percussive_mask;
+}
+
+static std::span<float> generate_harmonic_mask (HPSS_Processor& proc, std::span<const float> fft_abs_data)
+{
+    const auto harmonic_mask = proc.arena->make_span<float> (proc.fft_size / 2 + 1, 32);
+    for (int n = 0; n < proc.fft_size / 2 + 1; ++n)
+    {
+#if 1
+        MediatorInsert (proc.horizontal_mediators[n], fft_abs_data[n]);
+        harmonic_mask[n] = MediatorMedian (proc.horizontal_mediators[n]);
+#else
+        const auto median_element = (proc.kernel_size / 2) + 1;
+
+        const auto _ = proc.arena->create_frame();
+        const auto temp_data = proc.arena->make_span<float> (proc.kernel_size);
+
+        for (int k = 0; k < proc.kernel_size; ++k)
+            temp_data[k] = proc.fft_history[k][n];
+
+        std::nth_element (temp_data.begin(), temp_data.begin() + median_element, temp_data.end());
+        harmonic_mask[n] = temp_data[median_element];
+#endif
+    }
+    return harmonic_mask;
 }
 
 static std::span<complex> apply_spectral_mask (Memory_Arena<>& arena, std::span<const complex> spectrum, std::span<const float> mask)
@@ -167,36 +245,8 @@ std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& pr
     for (int n = 1; n < proc.fft_size / 2; ++n)
         fft_abs_data[n] = std::abs (fft_frame[n]);
 
-    const auto percussive_mask = proc.arena->make_span<float> (proc.fft_size / 2 + 1, 32);
-    for (int n = 0; n < proc.fft_size / 2 + 1; ++n)
-    {
-        const auto start_index = std::max (n - proc.kernel_size / 2, 0);
-        const auto end_index = std::min (n + proc.kernel_size / 2, proc.fft_size / 2);
-        const auto median_count = end_index - start_index;
-        const auto median_element = (median_count / 2) + 1;
-
-        const auto _ = proc.arena->create_frame();
-        const auto temp_data = proc.arena->make_span<float> (median_count);
-        std::copy (fft_abs_data.begin() + start_index, fft_abs_data.begin() + start_index + median_count, temp_data.begin());
-
-        std::nth_element (temp_data.begin(), temp_data.begin() + median_element, temp_data.end());
-        percussive_mask[n] = temp_data[median_element];
-    }
-
-    const auto harmonic_mask = proc.arena->make_span<float> (proc.fft_size / 2 + 1, 32);
-    for (int n = 0; n < proc.fft_size / 2 + 1; ++n)
-    {
-        const auto median_element = (proc.kernel_size / 2) + 1;
-
-        const auto _ = proc.arena->create_frame();
-        const auto temp_data = proc.arena->make_span<float> (proc.kernel_size);
-
-        for (int k = 0; k < proc.kernel_size; ++k)
-            temp_data[k] = proc.fft_history[k][n];
-
-        std::nth_element (temp_data.begin(), temp_data.begin() + median_element, temp_data.end());
-        harmonic_mask[n] = temp_data[median_element];
-    }
+    const auto percussive_mask = generate_percussive_mask (proc, fft_abs_data);
+    const auto harmonic_mask = generate_harmonic_mask (proc, fft_abs_data);
 
     for (int n = 0; n < proc.fft_size / 2 + 1; ++n)
     {
@@ -225,6 +275,8 @@ std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& pr
     return { hop_harmonic, hop_percussive };
 }
 } // namespace hpss
+
+#include "util/mediator.cpp"
 
 #if __clang__
 #pragma GCC diagnostic push

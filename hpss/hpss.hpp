@@ -40,6 +40,7 @@ struct Params
     float mask_power = 2.0f; // usually either one or two (maybe this can be an int?)
 };
 
+struct Mediator;
 struct HPSS_Processor
 {
     Memory_Arena<>* arena = nullptr;
@@ -61,6 +62,8 @@ struct HPSS_Processor
     std::span<float> window_in;
     std::span<float> last_window_harm;
     std::span<float> last_window_perc;
+
+    std::span<Mediator*> horizontal_mediators;
 };
 
 HPSS_Processor init (Params params);
