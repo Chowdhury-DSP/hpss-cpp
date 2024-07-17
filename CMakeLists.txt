@@ -11,6 +11,7 @@ target_sources(hpss
         hpss/hpss.cpp
 )
 target_include_directories(hpss PUBLIC .)
+target_compile_definitions(hpss PRIVATE _USE_MATH_DEFINES=1)
 
 option(HPSS_BUILD_TESTS OFF)
 if(HPSS_BUILD_TESTS)
