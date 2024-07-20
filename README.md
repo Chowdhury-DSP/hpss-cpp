@@ -54,13 +54,13 @@ Most of the "intermediate" steps of the algorithm are exposed as
 their own standalone methods. These can be called independently,
 which is useful in some cases.
 
-For example, in real-time processing the audio device buffer size
+For example, in real-time processing, the audio device buffer size
 may be smaller than the hop size used  by the HPSS algorithm. When
 using the Simple API, the user would  have wait until enough buffers
 have accumulated to process a single "hop", at which point the entire
 algorithm would run. In this scenario, the entire algorithm would
 need to be fast enough to meet the real-time deadline determined by
-the device buffer size.
+the buffer size.
 
 With the Complete API, the work being done by the algorithm can
 be split up into multiple steps. This allows an implementation
@@ -98,7 +98,7 @@ paper from DAFx10 ["Harmonic/Percussive Separation Using Median Filtering"](http
 The median computation is implemented using a min-max heap
 algorithm adapted from https://ideone.com/8VVEa (MIT license).
 
-The FFT is computed using [`pffft`](https://github.com/marton78/pffft).
+The FFT is computed using [`pffft`](https://github.com/marton78/pffft) (BSD-like license).
 
 ## Future Improvements
 
