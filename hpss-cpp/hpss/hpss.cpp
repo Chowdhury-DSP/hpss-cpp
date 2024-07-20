@@ -7,6 +7,7 @@
 
 #include "util/mediator.hpp"
 #include "util/power.hpp"
+#include "util/pffft_wrapper.hpp"
 
 namespace hpss
 {
@@ -234,10 +235,12 @@ static void apply_power (int exp, std::span<float> data)
     }
 }
 
-void combine_masks (int mask_power, std::span<float> percussive_mask, std::span<float> harmonic_mask)
+void balance_masks (HPSS_Processor& proc, std::span<float> percussive_mask, std::span<float> harmonic_mask)
 {
-    apply_power (mask_power, percussive_mask);
-    apply_power (mask_power, harmonic_mask);
+    // See comment in compute_fft_magnitudes().
+    const auto effective_mask_power = proc.use_squares ? proc.mask_power / 2 : proc.mask_power;
+    apply_power (effective_mask_power, percussive_mask);
+    apply_power (effective_mask_power, harmonic_mask);
 
     for (int n = 0; n < (int) percussive_mask.size(); ++n)
     {
@@ -252,9 +255,9 @@ void combine_masks (int mask_power, std::span<float> percussive_mask, std::span<
     }
 }
 
-std::span<complex> apply_spectral_mask (Memory_Arena<>& arena, std::span<const complex> spectrum, std::span<const float> mask)
+std::span<complex> apply_spectral_mask (HPSS_Processor& proc, std::span<const complex> spectrum, std::span<const float> mask)
 {
-    const auto spectrum_out = arena.make_span<complex> (spectrum.size(), 32);
+    const auto spectrum_out = proc.arena->make_span<complex> (spectrum.size(), 32);
 
     const auto N = spectrum.size();
     const auto M = mask.size();
@@ -315,12 +318,12 @@ std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& pr
 
     const auto percussive_mask = generate_percussive_mask (proc, fft_abs_data);
     const auto harmonic_mask = generate_harmonic_mask (proc, fft_abs_data);
-    combine_masks (proc.use_squares ? proc.mask_power / 2 : proc.mask_power, percussive_mask, harmonic_mask);
+    balance_masks (proc, percussive_mask, harmonic_mask);
 
-    const auto harmonic_spectrum = apply_spectral_mask (*proc.arena, fft_frame, harmonic_mask);
+    const auto harmonic_spectrum = apply_spectral_mask (proc, fft_frame, harmonic_mask);
     const auto harmonic_out = process_inverse_fft (proc, harmonic_spectrum);
 
-    const auto percussive_spectrum = apply_spectral_mask (*proc.arena, fft_frame, percussive_mask);
+    const auto percussive_spectrum = apply_spectral_mask (proc, fft_frame, percussive_mask);
     const auto percussive_out = process_inverse_fft (proc, percussive_spectrum);
 
     const auto hop_harmonic = overlap_add (proc, harmonic_out, proc.last_half_window_harm);
@@ -331,30 +334,3 @@ std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& pr
 } // namespace hpss
 
 #include "util/mediator.cpp"
-
-#if __clang__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wzero-as-null-pointer-constant"
-#pragma GCC diagnostic ignored "-Wshadow"
-#pragma GCC diagnostic ignored "-Wmissing-prototypes"
-#pragma GCC diagnostic ignored "-Wsign-conversion"
-#pragma GCC diagnostic ignored "-Wcast-align"
-#pragma GCC diagnostic ignored "-Wfloat-equal"
-#pragma GCC diagnostic ignored "-Wvla-extension"
-#endif
-
-#if defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 4005)
-#endif
-
-#include "pffft/pffft.c" // NOLINT
-#include "pffft/pffft_common.c" // NOLINT
-
-#if __clang__
-#pragma GCC diagnostic pop
-#endif
-
-#if defined(_MSC_VER)
-#pragma warning(pop)
-#endif
