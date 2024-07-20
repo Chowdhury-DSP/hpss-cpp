@@ -25,10 +25,11 @@ HPSS_Processor init (Params params)
 
     const auto mediator_size = MediatorSizeBytes (proc.kernel_size);
     proc.arena = new Memory_Arena<> {
-        4 * proc.fft_size * sizeof (complex)
-        + 5 * proc.window_size * sizeof (float)
+        3 * proc.fft_size * sizeof (complex)
+        + 3 * proc.window_size * sizeof (float)
+        + 2 * (proc.window_size / 2) * sizeof (float)
+        + 2 * proc.hop_size * sizeof (float)
         + 3 * (proc.fft_size / 2 + 8) * sizeof (float)
-        + 2 * params.kernel_size * sizeof (float)
         + (proc.fft_size / 2 + 1) * (mediator_size + 16)
         + 2048
     };
