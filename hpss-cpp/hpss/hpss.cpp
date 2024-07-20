@@ -10,8 +10,6 @@
 
 namespace hpss
 {
-using complex = std::complex<float>;
-
 HPSS_Processor init (Params params)
 {
     HPSS_Processor proc {};
@@ -68,7 +66,7 @@ void deinit (HPSS_Processor& proc)
     delete proc.arena;
 }
 
-static std::span<complex> process_forward_fft (HPSS_Processor& proc, std::span<const float> window_data)
+std::span<complex> process_forward_fft (HPSS_Processor& proc, std::span<const float> window_data)
 {
     // zero-pad and convert real-> split-complex
     std::fill (proc.fft_io_data, proc.fft_io_data + 2 * proc.fft_size, 0.0f);
@@ -89,7 +87,32 @@ static std::span<complex> process_forward_fft (HPSS_Processor& proc, std::span<c
     return fft_out;
 }
 
-static std::span<float> process_inverse_fft (HPSS_Processor& proc, std::span<const complex> fft_data)
+std::span<float> compute_fft_magnitudes (HPSS_Processor& proc, std::span<const complex> fft_frame)
+{
+    const auto fft_abs_data = proc.arena->make_span<float> (proc.fft_size / 2 + 1, 32);
+
+    // If mask_power is a multiple of 2, we compute the squared FFT values instead of absolute FFT values,
+    // which saves us a lot of std::sqrt calls. Then later we can use half the mask power when combining the
+    // masks, which saves us a bunch of multiplies!
+    if (proc.use_squares)
+    {
+        fft_abs_data[0] = power::ipow<2> (fft_frame[0].real());
+        fft_abs_data[proc.fft_size / 2] = power::ipow<2> (fft_frame[proc.fft_size / 2].real());
+        for (int n = 1; n < proc.fft_size / 2; ++n)
+            fft_abs_data[n] = power::ipow<2> (fft_frame[n].real()) + power::ipow<2> (fft_frame[n].imag());
+    }
+    else
+    {
+        fft_abs_data[0] = fft_frame[0].real();
+        fft_abs_data[proc.fft_size / 2] = fft_frame[proc.fft_size / 2].real();
+        for (int n = 1; n < proc.fft_size / 2; ++n)
+            fft_abs_data[n] = std::sqrt (power::ipow<2> (fft_frame[n].real()) + power::ipow<2> (fft_frame[n].imag()));
+    }
+
+    return fft_abs_data;
+}
+
+std::span<float> process_inverse_fft (HPSS_Processor& proc, std::span<const complex> fft_data)
 {
     std::copy (fft_data.begin(), fft_data.end(), reinterpret_cast<complex*> (proc.fft_io_data));
 
@@ -107,7 +130,7 @@ static std::span<float> process_inverse_fft (HPSS_Processor& proc, std::span<con
     return ifft_out;
 }
 
-static std::span<float> generate_percussive_mask (HPSS_Processor& proc, std::span<const float> fft_abs_data)
+std::span<float> generate_percussive_mask (HPSS_Processor& proc, std::span<const float> fft_abs_data)
 {
     const auto half_kernel = proc.kernel_size / 2;
     const auto percussive_mask = proc.arena->make_span<float> (proc.fft_size / 2 + 1, 32);
@@ -152,7 +175,7 @@ static std::span<float> generate_percussive_mask (HPSS_Processor& proc, std::spa
     return percussive_mask;
 }
 
-static std::span<float> generate_harmonic_mask (HPSS_Processor& proc, std::span<const float> fft_abs_data)
+std::span<float> generate_harmonic_mask (HPSS_Processor& proc, std::span<const float> fft_abs_data)
 {
     const auto harmonic_mask = proc.arena->make_span<float> (proc.fft_size / 2 + 1, 32);
     for (int n = 0; n < proc.fft_size / 2 + 1; ++n)
@@ -211,7 +234,7 @@ static void apply_power (int exp, std::span<float> data)
     }
 }
 
-static void combine_masks (int mask_power, std::span<float> percussive_mask, std::span<float> harmonic_mask)
+void combine_masks (int mask_power, std::span<float> percussive_mask, std::span<float> harmonic_mask)
 {
     apply_power (mask_power, percussive_mask);
     apply_power (mask_power, harmonic_mask);
@@ -229,7 +252,7 @@ static void combine_masks (int mask_power, std::span<float> percussive_mask, std
     }
 }
 
-static std::span<complex> apply_spectral_mask (Memory_Arena<>& arena, std::span<const complex> spectrum, std::span<const float> mask)
+std::span<complex> apply_spectral_mask (Memory_Arena<>& arena, std::span<const complex> spectrum, std::span<const float> mask)
 {
     const auto spectrum_out = arena.make_span<complex> (spectrum.size(), 32);
 
@@ -244,7 +267,7 @@ static std::span<complex> apply_spectral_mask (Memory_Arena<>& arena, std::span<
     return spectrum_out;
 }
 
-static std::span<float> overlap_add (HPSS_Processor& proc, std::span<const float> window, std::span<float> last_half_window)
+std::span<float> overlap_add (HPSS_Processor& proc, std::span<const float> window, std::span<float> last_half_window)
 {
     const auto hop_out = proc.arena->make_span<float> (proc.hop_size, 32);
     if (proc.hop_size == proc.window_size)
@@ -268,7 +291,7 @@ static std::span<float> overlap_add (HPSS_Processor& proc, std::span<const float
     return hop_out;
 }
 
-std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& proc, std::span<const float> hop_data)
+void push_new_window (HPSS_Processor& proc, std::span<const float> hop_data)
 {
     proc.arena->reset_to_frame (proc.arena_frame);
 
@@ -281,28 +304,14 @@ std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& pr
         std::copy (proc.window_in.begin() + proc.hop_size, proc.window_in.end(), proc.window_in.begin());
         std::copy (hop_data.begin(), hop_data.end(), proc.window_in.begin() + (proc.window_size - proc.hop_size));
     }
+}
+
+std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& proc, std::span<const float> hop_data)
+{
+    push_new_window (proc, hop_data);
 
     const auto fft_frame = process_forward_fft (proc, proc.window_in);
-
-    const auto fft_abs_data = proc.arena->make_span<float> (proc.fft_size / 2 + 1, 32);
-
-    // If mask_power is a multiple of 2, we compute the squared FFT values instead of absolute FFT values,
-    // which saves us a lot of std::sqrt calls. Then later we can use half the mask power when combining the
-    // masks, which saves us a bunch of multiplies!
-    if (proc.use_squares)
-    {
-        fft_abs_data[0] = power::ipow<2> (fft_frame[0].real());
-        fft_abs_data[proc.fft_size / 2] = power::ipow<2> (fft_frame[proc.fft_size / 2].real());
-        for (int n = 1; n < proc.fft_size / 2; ++n)
-            fft_abs_data[n] = power::ipow<2> (fft_frame[n].real()) + power::ipow<2> (fft_frame[n].imag());
-    }
-    else
-    {
-        fft_abs_data[0] = fft_frame[0].real();
-        fft_abs_data[proc.fft_size / 2] = fft_frame[proc.fft_size / 2].real();
-        for (int n = 1; n < proc.fft_size / 2; ++n)
-            fft_abs_data[n] = std::sqrt (power::ipow<2> (fft_frame[n].real()) + power::ipow<2> (fft_frame[n].imag()));
-    }
+    const auto fft_abs_data = compute_fft_magnitudes (proc, fft_frame);
 
     const auto percussive_mask = generate_percussive_mask (proc, fft_abs_data);
     const auto harmonic_mask = generate_harmonic_mask (proc, fft_abs_data);

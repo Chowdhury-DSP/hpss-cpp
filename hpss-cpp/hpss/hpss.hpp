@@ -1,5 +1,7 @@
 #pragma once
 
+#include <complex>
+
 #include "util/memory_arena.hpp"
 
 #if __clang__
@@ -64,7 +66,23 @@ struct HPSS_Processor
     std::span<Mediator*> horizontal_mediators;
 };
 
+using complex = std::complex<float>;
+
 HPSS_Processor init (Params params);
 void deinit (HPSS_Processor&);
+
 std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& proc, std::span<const float> hop_data);
+
+void push_new_window (HPSS_Processor& proc, std::span<const float> hop_data);
+
+std::span<complex> process_forward_fft (HPSS_Processor& proc, std::span<const float> window_data);
+std::span<float> compute_fft_magnitudes (HPSS_Processor& proc, std::span<const complex> fft_frame);
+std::span<float> process_inverse_fft (HPSS_Processor& proc, std::span<const complex> fft_data);
+
+std::span<float> generate_percussive_mask (HPSS_Processor& proc, std::span<const float> fft_abs_data);
+std::span<float> generate_harmonic_mask (HPSS_Processor& proc, std::span<const float> fft_abs_data);
+void combine_masks (int mask_power, std::span<float> percussive_mask, std::span<float> harmonic_mask);
+
+std::span<complex> apply_spectral_mask (Memory_Arena<>& arena, std::span<const complex> spectrum, std::span<const float> mask);
+std::span<float> overlap_add (HPSS_Processor& proc, std::span<const float> window, std::span<float> last_half_window);
 }
