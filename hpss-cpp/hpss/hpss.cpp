@@ -7,7 +7,6 @@
 
 #include "util/mediator.hpp"
 #include "util/power.hpp"
-#include "util/simd_math.hpp"
 
 namespace hpss
 {
@@ -22,7 +21,7 @@ HPSS_Processor init (Params params)
     proc.fft_size = params.window_size * params.zero_pad;
     proc.kernel_size = params.kernel_size;
     proc.mask_power = params.mask_power;
-    proc.using_avx = params.use_avx;
+    proc.use_squares = proc.mask_power > 2 && proc.mask_power % 2 == 0;
 
     const auto mediator_size = MediatorSizeBytes (proc.kernel_size);
     proc.arena = new Memory_Arena<> {
@@ -187,7 +186,7 @@ static void apply_power (int exp, std::span<float> data)
     switch (exp)
     {
         case 0:
-            std::fill (data.begin(), data.end(), 0.0f);
+            std::fill (data.begin(), data.end(), 1.0f);
             return;
         case 1:
             return;
@@ -233,10 +232,6 @@ static std::span<complex> apply_spectral_mask (Memory_Arena<>& arena, std::span<
 {
     const auto spectrum_out = arena.make_span<complex> (spectrum.size(), 32);
 
-    // const auto frame = arena.create_frame();
-    // const auto mask_refl = arena.make_span<float> (spectrum.size(), 32);
-    // std::copy (mask.begin(), mask.end(), mask_refl.begin());
-
     const auto N = spectrum.size();
     const auto M = mask.size();
     int n = 0;
@@ -257,15 +252,10 @@ static std::span<float> overlap_add (HPSS_Processor& proc, std::span<const float
     }
     else if (proc.hop_size == proc.window_size / 2)
     {
-        if (proc.using_avx)
+        for (int n = 0; n < proc.hop_size; ++n)
         {
-            simd::avx::multiply_8 (window.data(), proc.hann_window.data(), hop_out.data(), proc.hop_size);
-            simd::avx::multiply_add_8 (last_half_window.data(), proc.hann_window.data() + proc.hop_size, hop_out.data(), proc.hop_size);
-        }
-        else
-        {
-            simd::sse_or_neon::multiply_4 (window.data(), proc.hann_window.data(), hop_out.data(), proc.hop_size);
-            simd::sse_or_neon::multiply_add_4 (last_half_window.data(), proc.hann_window.data() + proc.hop_size, hop_out.data(), proc.hop_size);
+            hop_out[n] = window[n] * proc.hann_window[n];
+            hop_out[n] += last_half_window[n] * proc.hann_window[n + proc.hop_size];
         }
         std::copy (window.begin() + proc.hop_size, window.end(), last_half_window.begin());
     }
@@ -294,23 +284,34 @@ std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& pr
     const auto fft_frame = process_forward_fft (proc, proc.window_in);
 
     const auto fft_abs_data = proc.arena->make_span<float> (proc.fft_size / 2 + 1, 32);
-    fft_abs_data[0] = fft_frame[0].real();
-    fft_abs_data[proc.fft_size / 2] = fft_frame[proc.fft_size / 2].real();
-    for (int n = 1; n < proc.fft_size / 2; ++n)
-        fft_abs_data[n] = std::abs (fft_frame[n]);
+
+    // If mask_power is a multiple of 2, we compute the squared FFT values instead of absolute FFT values,
+    // which saves us a lot of std::sqrt calls. Then later we can use half the mask power when combining the
+    // masks, which saves us a bunch of multiplies!
+    if (proc.use_squares)
+    {
+        fft_abs_data[0] = power::ipow<2> (fft_frame[0].real());
+        fft_abs_data[proc.fft_size / 2] = power::ipow<2> (fft_frame[proc.fft_size / 2].real());
+        for (int n = 1; n < proc.fft_size / 2; ++n)
+            fft_abs_data[n] = power::ipow<2> (fft_frame[n].real()) + power::ipow<2> (fft_frame[n].imag());
+    }
+    else
+    {
+        fft_abs_data[0] = fft_frame[0].real();
+        fft_abs_data[proc.fft_size / 2] = fft_frame[proc.fft_size / 2].real();
+        for (int n = 1; n < proc.fft_size / 2; ++n)
+            fft_abs_data[n] = std::sqrt (power::ipow<2> (fft_frame[n].real()) + power::ipow<2> (fft_frame[n].imag()));
+    }
 
     const auto percussive_mask = generate_percussive_mask (proc, fft_abs_data);
     const auto harmonic_mask = generate_harmonic_mask (proc, fft_abs_data);
-    combine_masks (proc.mask_power, percussive_mask, harmonic_mask);
+    combine_masks (proc.use_squares ? proc.mask_power / 2 : proc.mask_power, percussive_mask, harmonic_mask);
 
     const auto harmonic_spectrum = apply_spectral_mask (*proc.arena, fft_frame, harmonic_mask);
     const auto harmonic_out = process_inverse_fft (proc, harmonic_spectrum);
 
     const auto percussive_spectrum = apply_spectral_mask (*proc.arena, fft_frame, percussive_mask);
     const auto percussive_out = process_inverse_fft (proc, percussive_spectrum);
-
-    // auto window_out = process_inverse_fft (proc, fft_frame);
-    // const auto hop_out= overlap_add (proc, window_out, proc.last_window_out);
 
     const auto hop_harmonic = overlap_add (proc, harmonic_out, proc.last_half_window_harm);
     const auto hop_percussive = overlap_add (proc, percussive_out, proc.last_half_window_perc);

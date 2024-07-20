@@ -14,15 +14,6 @@ target_sources(hpss
 target_include_directories(hpss PUBLIC hpss-cpp)
 target_compile_definitions(hpss PRIVATE _USE_MATH_DEFINES=1)
 
-## Accelerated Math Library ##
-include(RuntimeSIMDLib)
-make_lib_simd_runtime(math_accelerated
-    SOURCES
-        hpss-cpp/hpss/util/simd_math.hpp
-        hpss-cpp/hpss/util/simd_math.cpp
-)
-target_link_libraries(hpss PRIVATE math_accelerated)
-
 ## Tests ##
 option(HPSS_BUILD_TESTS OFF)
 if(HPSS_BUILD_TESTS)

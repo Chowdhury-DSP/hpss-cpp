@@ -34,11 +34,10 @@ namespace hpss
 struct Params
 {
     int window_size = 1 << 11; // integer power of 2
-    int hop_factor = 2; // integer power of 2
+    int hop_factor = 2; // integer power of 2 (right now only 1 and 2 are allowed)
     int zero_pad = 2; // integer power of 2
     int kernel_size = 17; // must be odd
     int mask_power = 2; // [0, 16] (usually either one or two)
-    bool use_avx = false;
 };
 
 struct Mediator;
@@ -52,7 +51,7 @@ struct HPSS_Processor
     int fft_size = 0;
     int kernel_size = 0;
     int mask_power = 0;
-    bool using_avx = false;
+    bool use_squares = false;
 
     PFFFT_Setup* fft_setup = nullptr;
     float* fft_io_data = nullptr;
