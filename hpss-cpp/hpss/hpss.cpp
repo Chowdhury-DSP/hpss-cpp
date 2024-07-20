@@ -259,8 +259,8 @@ static std::span<float> overlap_add (HPSS_Processor& proc, std::span<const float
     {
         if (proc.using_avx)
         {
-            simd::avx::multiply_4 (window.data(), proc.hann_window.data(), hop_out.data(), proc.hop_size);
-            simd::avx::multiply_add_4 (last_half_window.data(), proc.hann_window.data() + proc.hop_size, hop_out.data(), proc.hop_size);
+            simd::avx::multiply_8 (window.data(), proc.hann_window.data(), hop_out.data(), proc.hop_size);
+            simd::avx::multiply_add_8 (last_half_window.data(), proc.hann_window.data() + proc.hop_size, hop_out.data(), proc.hop_size);
         }
         else
         {
