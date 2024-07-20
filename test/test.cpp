@@ -53,7 +53,8 @@ int main (int argc, char* argv[])
         .window_size = 1 << 12,
         .hop_factor = 2,
         .zero_pad = 2,
-        .mask_power = 2.0f,
+        .mask_power = 2,
+        .use_avx = true,
     };
     const auto hpss_procs = arena.make_span<hpss::HPSS_Processor> (num_channels);
     for (auto& proc : hpss_procs)

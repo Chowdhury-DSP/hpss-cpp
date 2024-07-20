@@ -5,11 +5,12 @@
 #include <limits>
 #include <numeric>
 
-#include "util/mediator.h"
+#include "util/mediator.hpp"
+#include "util/power.hpp"
+#include "util/simd_math.hpp"
 
 namespace hpss
 {
-// @TODO: maybe it would be faster to work with de-interleaved data?
 using complex = std::complex<float>;
 
 HPSS_Processor init (Params params)
@@ -21,11 +22,12 @@ HPSS_Processor init (Params params)
     proc.fft_size = params.window_size * params.zero_pad;
     proc.kernel_size = params.kernel_size;
     proc.mask_power = params.mask_power;
+    proc.using_avx = params.use_avx;
 
     const auto mediator_size = MediatorSizeBytes (proc.kernel_size);
     proc.arena = new Memory_Arena<> {
         4 * proc.fft_size * sizeof (complex)
-        + 6 * proc.window_size * sizeof (float)
+        + 5 * proc.window_size * sizeof (float)
         + 3 * (proc.fft_size / 2 + 8) * sizeof (float)
         + 2 * params.kernel_size * sizeof (float)
         + (proc.fft_size / 2 + 1) * (mediator_size + 16)
@@ -44,10 +46,10 @@ HPSS_Processor init (Params params)
 
     proc.window_in = proc.arena->make_span<float> (proc.window_size, 32);
     std::fill (proc.window_in.begin(), proc.window_in.end(), 0.0f);
-    proc.last_window_harm = proc.arena->make_span<float> (proc.window_size, 32);
-    std::fill (proc.last_window_harm.begin(), proc.last_window_harm.end(), 0.0f);
-    proc.last_window_perc = proc.arena->make_span<float> (proc.window_size, 32);
-    std::fill (proc.last_window_perc.begin(), proc.last_window_perc.end(), 0.0f);
+    proc.last_half_window_harm = proc.arena->make_span<float> (proc.window_size / 2, 32);
+    std::fill (proc.last_half_window_harm.begin(), proc.last_half_window_harm.end(), 0.0f);
+    proc.last_half_window_perc = proc.arena->make_span<float> (proc.window_size / 2, 32);
+    std::fill (proc.last_half_window_harm.begin(), proc.last_half_window_harm.end(), 0.0f);
 
     proc.horizontal_mediators = proc.arena->make_span<Mediator*> (proc.fft_size / 2 + 1);
     for (auto& mediator : proc.horizontal_mediators)
@@ -174,9 +176,66 @@ static std::span<float> generate_harmonic_mask (HPSS_Processor& proc, std::span<
     return harmonic_mask;
 }
 
+static void apply_power (int exp, std::span<float> data)
+{
+#define HPSS_POWER_EXP(exp_val) \
+    case (exp_val): \
+    for (auto& x : data) \
+        x = power::ipow<(exp_val)> (x); \
+    return
+
+    switch (exp)
+    {
+        case 0:
+            std::fill (data.begin(), data.end(), 0.0f);
+            return;
+        case 1:
+            return;
+        HPSS_POWER_EXP (2);
+        HPSS_POWER_EXP (3);
+        HPSS_POWER_EXP (4);
+        HPSS_POWER_EXP (5);
+        HPSS_POWER_EXP (6);
+        HPSS_POWER_EXP (7);
+        HPSS_POWER_EXP (8);
+        HPSS_POWER_EXP (9);
+        HPSS_POWER_EXP (10);
+        HPSS_POWER_EXP (11);
+        HPSS_POWER_EXP (12);
+        HPSS_POWER_EXP (13);
+        HPSS_POWER_EXP (14);
+        HPSS_POWER_EXP (15);
+        HPSS_POWER_EXP (16);
+        default:
+            return;
+    }
+}
+
+static void combine_masks (int mask_power, std::span<float> percussive_mask, std::span<float> harmonic_mask)
+{
+    apply_power (mask_power, percussive_mask);
+    apply_power (mask_power, harmonic_mask);
+
+    for (int n = 0; n < (int) percussive_mask.size(); ++n)
+    {
+        static constexpr auto eps = std::numeric_limits<float>::epsilon();
+
+        const auto H_p = harmonic_mask[n];
+        const auto P_p = percussive_mask[n];
+        const auto denom = 1.0f / (H_p + P_p + eps);
+
+        harmonic_mask[n] = H_p * denom;
+        percussive_mask[n] = P_p * denom;
+    }
+}
+
 static std::span<complex> apply_spectral_mask (Memory_Arena<>& arena, std::span<const complex> spectrum, std::span<const float> mask)
 {
     const auto spectrum_out = arena.make_span<complex> (spectrum.size(), 32);
+
+    // const auto frame = arena.create_frame();
+    // const auto mask_refl = arena.make_span<float> (spectrum.size(), 32);
+    // std::copy (mask.begin(), mask.end(), mask_refl.begin());
 
     const auto N = spectrum.size();
     const auto M = mask.size();
@@ -189,7 +248,7 @@ static std::span<complex> apply_spectral_mask (Memory_Arena<>& arena, std::span<
     return spectrum_out;
 }
 
-static std::span<float> overlap_add (HPSS_Processor& proc, std::span<const float> window, std::span<float> last_window)
+static std::span<float> overlap_add (HPSS_Processor& proc, std::span<const float> window, std::span<float> last_half_window)
 {
     const auto hop_out = proc.arena->make_span<float> (proc.hop_size, 32);
     if (proc.hop_size == proc.window_size)
@@ -198,13 +257,17 @@ static std::span<float> overlap_add (HPSS_Processor& proc, std::span<const float
     }
     else if (proc.hop_size == proc.window_size / 2)
     {
-        for (int n = 0; n < proc.hop_size; ++n)
+        if (proc.using_avx)
         {
-            hop_out[n] = window[n] * proc.hann_window[n];
-            hop_out[n] += last_window[n + proc.hop_size] * proc.hann_window[proc.hop_size - n - 1];
+            simd::avx::multiply_4 (window.data(), proc.hann_window.data(), hop_out.data(), proc.hop_size);
+            simd::avx::multiply_add_4 (last_half_window.data(), proc.hann_window.data() + proc.hop_size, hop_out.data(), proc.hop_size);
         }
-
-        std::copy (window.begin(), window.end(), last_window.begin());
+        else
+        {
+            simd::sse_or_neon::multiply_4 (window.data(), proc.hann_window.data(), hop_out.data(), proc.hop_size);
+            simd::sse_or_neon::multiply_add_4 (last_half_window.data(), proc.hann_window.data() + proc.hop_size, hop_out.data(), proc.hop_size);
+        }
+        std::copy (window.begin() + proc.hop_size, window.end(), last_half_window.begin());
     }
     else
     {
@@ -238,19 +301,7 @@ std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& pr
 
     const auto percussive_mask = generate_percussive_mask (proc, fft_abs_data);
     const auto harmonic_mask = generate_harmonic_mask (proc, fft_abs_data);
-
-    // @TODO: optimize this loop!
-    for (int n = 0; n < proc.fft_size / 2 + 1; ++n)
-    {
-        static constexpr auto eps = std::numeric_limits<float>::epsilon();
-
-        const auto H_p = std::pow (harmonic_mask[n], proc.mask_power);
-        const auto P_p = std::pow (percussive_mask[n], proc.mask_power);
-        const auto denom = 1.0f / (H_p + P_p + eps);
-
-        harmonic_mask[n] = H_p * denom;
-        percussive_mask[n] = P_p * denom;
-    }
+    combine_masks (proc.mask_power, percussive_mask, harmonic_mask);
 
     const auto harmonic_spectrum = apply_spectral_mask (*proc.arena, fft_frame, harmonic_mask);
     const auto harmonic_out = process_inverse_fft (proc, harmonic_spectrum);
@@ -261,8 +312,8 @@ std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& pr
     // auto window_out = process_inverse_fft (proc, fft_frame);
     // const auto hop_out= overlap_add (proc, window_out, proc.last_window_out);
 
-    const auto hop_harmonic = overlap_add (proc, harmonic_out, proc.last_window_harm);
-    const auto hop_percussive = overlap_add (proc, percussive_out, proc.last_window_perc);
+    const auto hop_harmonic = overlap_add (proc, harmonic_out, proc.last_half_window_harm);
+    const auto hop_percussive = overlap_add (proc, percussive_out, proc.last_half_window_perc);
 
     return { hop_harmonic, hop_percussive };
 }

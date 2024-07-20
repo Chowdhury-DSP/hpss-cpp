@@ -37,7 +37,8 @@ struct Params
     int hop_factor = 2; // integer power of 2
     int zero_pad = 2; // integer power of 2
     int kernel_size = 17; // must be odd
-    float mask_power = 2.0f; // usually either one or two (maybe this can be an int?)
+    int mask_power = 2; // [0, 16] (usually either one or two)
+    bool use_avx = false;
 };
 
 struct Mediator;
@@ -50,15 +51,16 @@ struct HPSS_Processor
     int hop_size = 0;
     int fft_size = 0;
     int kernel_size = 0;
-    float mask_power = 0.0f;
+    int mask_power = 0;
+    bool using_avx = false;
 
     PFFFT_Setup* fft_setup = nullptr;
     float* fft_io_data = nullptr;
 
     std::span<float> hann_window;
     std::span<float> window_in;
-    std::span<float> last_window_harm;
-    std::span<float> last_window_perc;
+    std::span<float> last_half_window_harm;
+    std::span<float> last_half_window_perc;
 
     std::span<Mediator*> horizontal_mediators;
 };

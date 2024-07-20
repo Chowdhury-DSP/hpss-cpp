@@ -1,4 +1,4 @@
-#include "mediator.h"
+#include "mediator.hpp"
 
 namespace hpss
 {
