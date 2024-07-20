@@ -9,13 +9,13 @@ struct PFFFT_Setup;
 
 /**
  * Harmonic/Percussive Source Separation (HPSS), based on
- * Harmonic/Percussive Separation Using Median Filtering, by Derry Fitzgerald, published at DAFx10.
+ * "Harmonic/Percussive Separation Using Median Filtering", by Derry Fitzgerald, published at DAFx10.
  * (https://arrow.tudublin.ie/cgi/viewcontent.cgi?article=1078&context=argcon)
  *
  * There are two APIs that a user can use for processing data, the "Simple" API,
- * and the "Complex" API. The initialization/de-initialization methods
+ * and the "Complete" API. The initialization/de-initialization methods
  * are shared by both APIs. The Simple API only contains one method: `process_window()`.
- * All other methods are part of the Complex API, starting with `push_new_window()`.
+ * All other methods are part of the Complete API, starting with `push_new_window()`.
  */
 namespace hpss
 {
