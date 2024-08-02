@@ -69,10 +69,9 @@ void deinit (HPSS_Processor& proc)
 
 std::span<complex> process_forward_fft (HPSS_Processor& proc, std::span<const float> window_data)
 {
-    // zero-pad and convert real-> split-complex
-    std::fill (proc.fft_io_data, proc.fft_io_data + 2 * proc.fft_size, 0.0f);
-    for (size_t n = 0; n < window_data.size(); ++n)
-        proc.fft_io_data[n] = window_data[n];
+    // zero-pad
+    std::copy (window_data.begin(), window_data.end(), proc.fft_io_data);
+    std::fill (proc.fft_io_data + proc.window_size, proc.fft_io_data + proc.fft_size, 0.0f);
 
     pffft_transform_ordered (proc.fft_setup,
                              proc.fft_io_data,
