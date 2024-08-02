@@ -24,16 +24,16 @@ HPSS_Processor init (Params params)
 
     const auto mediator_size = MediatorSizeBytes (proc.kernel_size);
     proc.arena = new Memory_Arena<> {
-        3 * proc.fft_size * sizeof (complex)
+        1 * proc.fft_size * sizeof (complex)
         + 3 * proc.window_size * sizeof (float)
         + 2 * (proc.window_size / 2) * sizeof (float)
         + 2 * proc.hop_size * sizeof (float)
-        + 3 * (proc.fft_size / 2 + 8) * sizeof (float)
+        + 5 * (proc.fft_size / 2 + 8) * sizeof (float)
         + (proc.fft_size / 2 + 1) * (mediator_size + 16)
         + 2048
     };
 
-    proc.fft_setup = pffft_new_setup (proc.fft_size, PFFFT_COMPLEX);
+    proc.fft_setup = pffft_new_setup (proc.fft_size, PFFFT_REAL);
     proc.fft_io_data = static_cast<float*> (pffft_aligned_malloc (2 * proc.fft_size * sizeof (complex)));
 
     proc.hann_window = proc.arena->make_span<float> (proc.window_size, 32);
@@ -72,7 +72,7 @@ std::span<complex> process_forward_fft (HPSS_Processor& proc, std::span<const fl
     // zero-pad and convert real-> split-complex
     std::fill (proc.fft_io_data, proc.fft_io_data + 2 * proc.fft_size, 0.0f);
     for (size_t n = 0; n < window_data.size(); ++n)
-        proc.fft_io_data[n * 2] = window_data[n];
+        proc.fft_io_data[n] = window_data[n];
 
     pffft_transform_ordered (proc.fft_setup,
                              proc.fft_io_data,
@@ -80,10 +80,12 @@ std::span<complex> process_forward_fft (HPSS_Processor& proc, std::span<const fl
                              nullptr, // optional "work buffer"
                              PFFFT_FORWARD);
 
-    const auto fft_out = proc.arena->make_span<complex> (proc.fft_size, 32);
+    const auto fft_out = proc.arena->make_span<complex> (proc.fft_size / 2 + 1, 32);
     std::copy (reinterpret_cast<complex*> (proc.fft_io_data),
                reinterpret_cast<complex*> (proc.fft_io_data) + proc.fft_size,
                fft_out.data());
+    fft_out.back() = fft_out.front().imag();
+    fft_out.front() = fft_out.front().real();
 
     return fft_out;
 }
@@ -116,6 +118,8 @@ std::span<float> compute_fft_magnitudes (HPSS_Processor& proc, std::span<const c
 std::span<float> process_inverse_fft (HPSS_Processor& proc, std::span<const complex> fft_data)
 {
     std::copy (fft_data.begin(), fft_data.end(), reinterpret_cast<complex*> (proc.fft_io_data));
+    proc.fft_io_data[1] = proc.fft_io_data[proc.fft_size / 2];
+    proc.fft_io_data[proc.fft_size / 2] = 0.0f;
 
     pffft_transform_ordered (proc.fft_setup,
                              proc.fft_io_data,
@@ -126,7 +130,7 @@ std::span<float> process_inverse_fft (HPSS_Processor& proc, std::span<const comp
     const auto norm_gain = 1.0f / static_cast<float> (proc.fft_size);
     const auto ifft_out = proc.arena->make_span<float> (proc.window_size, 32);
     for (int n = 0; n < proc.window_size; ++n)
-        ifft_out[n] = proc.fft_io_data[n * 2] * norm_gain;
+        ifft_out[n] = proc.fft_io_data[n] * norm_gain;
 
     return ifft_out;
 }
@@ -259,13 +263,9 @@ std::span<complex> apply_spectral_mask (HPSS_Processor& proc, std::span<const co
 {
     const auto spectrum_out = proc.arena->make_span<complex> (spectrum.size(), 32);
 
-    const auto N = spectrum.size();
     const auto M = mask.size();
-    int n = 0;
-    for (; n < M; ++n)
+    for (int n = 0; n < M; ++n)
         spectrum_out[n] = spectrum[n] * mask[n];
-    for (; n < N; ++n)
-        spectrum_out[n] = spectrum[n] * mask[N - n];
 
     return spectrum_out;
 }
