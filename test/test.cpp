@@ -68,7 +68,7 @@ int main (int argc, char* argv[])
         {
             const auto window = ref_signal[channel].subspan (sample_count, hpss_procs[channel].hop_size);
 
-            const auto [harmonic_out, percussive_out] = hpss::process_window (hpss_procs[channel], window);
+            const auto [harmonic_out, percussive_out] = hpss::process_hop (hpss_procs[channel], window);
 
             std::copy (harmonic_out.begin(), harmonic_out.end(), harmonic_signal[channel].begin() + sample_count);
             std::copy (percussive_out.begin(), percussive_out.end(), percussive_signal[channel].begin() + sample_count);

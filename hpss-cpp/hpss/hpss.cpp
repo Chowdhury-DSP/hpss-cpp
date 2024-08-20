@@ -7,7 +7,8 @@
 
 #include "util/mediator.hpp"
 #include "util/power.hpp"
-#include "util/pffft_wrapper.hpp"
+// #include "util/pffft_wrapper.hpp"
+#include <chowdsp_fft.h>
 
 namespace hpss
 {
@@ -33,8 +34,8 @@ HPSS_Processor init (Params params)
         + 2048
     };
 
-    proc.fft_setup = pffft_new_setup (proc.fft_size, PFFFT_REAL);
-    proc.fft_io_data = static_cast<float*> (pffft_aligned_malloc (2 * proc.fft_size * sizeof (complex)));
+    proc.fft_setup = chowdsp::fft::fft_new_setup (proc.fft_size, chowdsp::fft::FFT_REAL);
+    proc.fft_io_data = static_cast<float*> (chowdsp::fft::aligned_malloc (2 * proc.fft_size * sizeof (complex)));
 
     proc.hann_window = proc.arena->make_span<float> (proc.window_size, 32);
     for (int n = 0; n < proc.window_size; ++n)
@@ -61,8 +62,8 @@ HPSS_Processor init (Params params)
 
 void deinit (HPSS_Processor& proc)
 {
-    pffft_aligned_free (proc.fft_io_data);
-    pffft_destroy_setup (proc.fft_setup);
+    chowdsp::fft::aligned_free (proc.fft_io_data);
+    chowdsp::fft::fft_destroy_setup (proc.fft_setup);
 
     delete proc.arena;
 }
@@ -73,11 +74,11 @@ std::span<complex> process_forward_fft (HPSS_Processor& proc, std::span<const fl
     std::copy (window_data.begin(), window_data.end(), proc.fft_io_data);
     std::fill (proc.fft_io_data + proc.window_size, proc.fft_io_data + proc.fft_size, 0.0f);
 
-    pffft_transform_ordered (proc.fft_setup,
-                             proc.fft_io_data,
-                             proc.fft_io_data,
-                             nullptr, // optional "work buffer"
-                             PFFFT_FORWARD);
+    chowdsp::fft::fft_transform (proc.fft_setup,
+                                 proc.fft_io_data,
+                                 proc.fft_io_data,
+                                 nullptr, // optional "work buffer"
+                                 chowdsp::fft::FFT_FORWARD);
 
     const auto fft_out = proc.arena->make_span<complex> (proc.fft_size / 2 + 1, 32);
     std::copy (reinterpret_cast<complex*> (proc.fft_io_data),
@@ -120,11 +121,11 @@ std::span<float> process_inverse_fft (HPSS_Processor& proc, std::span<const comp
     proc.fft_io_data[1] = proc.fft_io_data[proc.fft_size / 2];
     proc.fft_io_data[proc.fft_size / 2] = 0.0f;
 
-    pffft_transform_ordered (proc.fft_setup,
-                             proc.fft_io_data,
-                             proc.fft_io_data,
-                             nullptr, // optional "work buffer"
-                             PFFFT_BACKWARD);
+    chowdsp::fft::fft_transform (proc.fft_setup,
+                                 proc.fft_io_data,
+                                 proc.fft_io_data,
+                                 nullptr, // optional "work buffer"
+                                 chowdsp::fft::FFT_BACKWARD);
 
     const auto norm_gain = 1.0f / static_cast<float> (proc.fft_size);
     const auto ifft_out = proc.arena->make_span<float> (proc.window_size, 32);
@@ -205,11 +206,11 @@ std::span<float> generate_harmonic_mask (HPSS_Processor& proc, std::span<const f
 
 static void apply_power (int exp, std::span<float> data)
 {
-#define HPSS_POWER_EXP(exp_val) \
-    case (exp_val): \
-    for (auto& x : data) \
-        x = power::ipow<(exp_val)> (x); \
-    return
+#define HPSS_POWER_EXP(exp_val)             \
+    case (exp_val):                         \
+        for (auto& x : data)                \
+            x = power::ipow<(exp_val)> (x); \
+        return
 
     switch (exp)
     {
@@ -218,21 +219,21 @@ static void apply_power (int exp, std::span<float> data)
             return;
         case 1:
             return;
-        HPSS_POWER_EXP (2);
-        HPSS_POWER_EXP (3);
-        HPSS_POWER_EXP (4);
-        HPSS_POWER_EXP (5);
-        HPSS_POWER_EXP (6);
-        HPSS_POWER_EXP (7);
-        HPSS_POWER_EXP (8);
-        HPSS_POWER_EXP (9);
-        HPSS_POWER_EXP (10);
-        HPSS_POWER_EXP (11);
-        HPSS_POWER_EXP (12);
-        HPSS_POWER_EXP (13);
-        HPSS_POWER_EXP (14);
-        HPSS_POWER_EXP (15);
-        HPSS_POWER_EXP (16);
+            HPSS_POWER_EXP (2);
+            HPSS_POWER_EXP (3);
+            HPSS_POWER_EXP (4);
+            HPSS_POWER_EXP (5);
+            HPSS_POWER_EXP (6);
+            HPSS_POWER_EXP (7);
+            HPSS_POWER_EXP (8);
+            HPSS_POWER_EXP (9);
+            HPSS_POWER_EXP (10);
+            HPSS_POWER_EXP (11);
+            HPSS_POWER_EXP (12);
+            HPSS_POWER_EXP (13);
+            HPSS_POWER_EXP (14);
+            HPSS_POWER_EXP (15);
+            HPSS_POWER_EXP (16);
         default:
             return;
     }
@@ -293,7 +294,7 @@ std::span<float> overlap_add (HPSS_Processor& proc, std::span<const float> windo
     return hop_out;
 }
 
-void push_new_window (HPSS_Processor& proc, std::span<const float> hop_data)
+void push_new_hop (HPSS_Processor& proc, std::span<const float> hop_data)
 {
     proc.arena->reset_to_frame (proc.arena_frame);
 
@@ -308,9 +309,9 @@ void push_new_window (HPSS_Processor& proc, std::span<const float> hop_data)
     }
 }
 
-std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& proc, std::span<const float> hop_data)
+std::pair<std::span<float>, std::span<float>> process_hop (HPSS_Processor& proc, std::span<const float> hop_data)
 {
-    push_new_window (proc, hop_data);
+    push_new_hop (proc, hop_data);
 
     const auto fft_frame = process_forward_fft (proc, proc.window_in);
     const auto fft_abs_data = compute_fft_magnitudes (proc, fft_frame);

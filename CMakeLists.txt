@@ -14,6 +14,16 @@ target_sources(hpss
 target_include_directories(hpss PUBLIC hpss-cpp)
 target_compile_definitions(hpss PRIVATE _USE_MATH_DEFINES=1)
 
+if(NOT TARGET chowdsp_fft)
+    include(CPM)
+    CPMAddPackage(
+        NAME chowdsp_fft
+        GIT_TAG main
+        GITHUB_REPOSITORY Chowdhury-DSP/chowdsp_fft
+    )
+endif()
+target_link_libraries(hpss PRIVATE chowdsp_fft)
+
 ## Tests ##
 option(HPSS_BUILD_TESTS OFF)
 if(HPSS_BUILD_TESTS)

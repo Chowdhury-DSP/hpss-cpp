@@ -15,12 +15,7 @@ add_subdirectory(hpss-cpp)
 target_link_libraries(MyCoolProject PRIVATE hpss)
 ```
 
-### Compiling without CMake
-
-The library contains one "global" header file (`hpss-cpp/hpss/hpss.hpp`)
-and one "global" implementation file (`hpss-cpp/hpss/hpss.cpp`). The
-library should be compatible with any build system, so long as those
-two files are included/compiled appropriately.
+## Usage
 
 ### Using the Simple API
 
@@ -60,7 +55,7 @@ using the Simple API, the user would  have wait until enough buffers
 have accumulated to process a single "hop", at which point the entire
 algorithm would run. In this scenario, the entire algorithm would
 need to be fast enough to meet the real-time deadline determined by
-the buffer size.
+the device buffer size.
 
 With the Complete API, the work being done by the algorithm can
 be split up into multiple steps. This allows an implementation
@@ -98,7 +93,7 @@ paper from DAFx10 ["Harmonic/Percussive Separation Using Median Filtering"](http
 The median computation is implemented using a min-max heap
 algorithm adapted from https://ideone.com/8VVEa (MIT license).
 
-The FFT is computed using [`pffft`](https://github.com/marton78/pffft) (BSD-like license).
+The FFT is computed using [`chowdsp_fft`](https://github.com/Chowdhury-DSP/chowdsp_fft).
 
 ## Future Improvements
 

@@ -4,9 +4,6 @@
 
 #include "util/memory_arena.hpp"
 
-// Forward declarations
-struct PFFFT_Setup;
-
 /**
  * Harmonic/Percussive Source Separation (HPSS), based on
  * "Harmonic/Percussive Separation Using Median Filtering", by Derry Fitzgerald, published at DAFx10.
@@ -50,7 +47,7 @@ struct HPSS_Processor
     int mask_power = 0;
     bool use_squares = false;
 
-    PFFFT_Setup* fft_setup = nullptr;
+    void* fft_setup = nullptr;
     float* fft_io_data = nullptr;
 
     std::span<float> hann_window;
@@ -73,29 +70,29 @@ HPSS_Processor init (Params params);
 void deinit (HPSS_Processor&);
 
 /**
- * Generates a harmonic and percussive signal for a window of audio data.
+ * Generates a harmonic and percussive signal for a hop of audio data.
  * The returned data is guaranteed to be valid until the next call to this
  * method.
  *
  * @param hop_data A span[proc.hop_size] of audio data.
  * @return A pair of span[proc.hop_size], with the order { harmonic, percussive }.
  */
-std::pair<std::span<float>, std::span<float>> process_window (HPSS_Processor& proc, std::span<const float> hop_data);
+std::pair<std::span<float>, std::span<float>> process_hop (HPSS_Processor& proc, std::span<const float> hop_data);
 
 /**
- * Pushes a new window of audio data into the processor.
+ * Pushes a new hop of audio data into the processor.
  * Calling this method will reset the memory arena, thereby
  * invalidating the results of all the following methods.
  *
  * @param hop_data A span[proc.hop_size] of audio data.
  */
-void push_new_window (HPSS_Processor& proc, std::span<const float> hop_data);
+void push_new_hop (HPSS_Processor& proc, std::span<const float> hop_data);
 
 /**
  * Computes an FFT frame from the given window.
  *
  * @param window_data A span[proc.window_size] of audio data.
- * @return A span[proc.fft_size] of interleaved-complex FFT data.
+ * @return A span[proc.fft_size / 2 + 1] of interleaved-complex FFT data.
  */
 std::span<complex> process_forward_fft (HPSS_Processor& proc, std::span<const float> window_data);
 
@@ -104,7 +101,7 @@ std::span<complex> process_forward_fft (HPSS_Processor& proc, std::span<const fl
  * This will either be the absolute value or the squared value,
  * depending on the value of proc.mask_power.
  *
- * @param fft_frame A span[proc.fft_size] of interleaved-complex FFT data.
+ * @param fft_frame A span[proc.fft_size / 2 + 1] of interleaved-complex FFT data.
  * @return A span[proc.fft_size / 2 + 1] of magnitude data.
  */
 std::span<float> compute_fft_magnitudes (HPSS_Processor& proc, std::span<const complex> fft_frame);
@@ -112,7 +109,7 @@ std::span<float> compute_fft_magnitudes (HPSS_Processor& proc, std::span<const c
 /**
  * Computes the inverse FFT of the given FFT frame.
  *
- * @param fft_data A span[proc.fft_size] of interleaved-complex FFT data.
+ * @param fft_data A span[proc.fft_size / 2 + 1] of interleaved-complex FFT data.
  * @return A span[proc.window_size] of audio data.
  */
 std::span<float> process_inverse_fft (HPSS_Processor& proc, std::span<const complex> fft_data);
