@@ -5,7 +5,7 @@
 #include <limits>
 #include <numeric>
 
-#include "util/mediator.hpp"
+#include "util/median.hpp"
 #include "util/power.hpp"
 // #include "util/pffft_wrapper.hpp"
 #include <chowdsp_fft.h>
@@ -23,7 +23,7 @@ HPSS_Processor init (Params params)
     proc.mask_power = params.mask_power;
     proc.use_squares = proc.mask_power > 2 && proc.mask_power % 2 == 0;
 
-    const auto mediator_size = MediatorSizeBytes (proc.kernel_size);
+    const auto mediator_size = Median::bytes_required (proc.kernel_size);
     proc.arena = new Memory_Arena<> {
         1 * proc.fft_size * sizeof (complex)
         + 3 * proc.window_size * sizeof (float)
@@ -51,9 +51,9 @@ HPSS_Processor init (Params params)
     proc.last_half_window_perc = proc.arena->make_span<float> (proc.window_size / 2, 32);
     std::fill (proc.last_half_window_harm.begin(), proc.last_half_window_harm.end(), 0.0f);
 
-    proc.horizontal_mediators = proc.arena->make_span<Mediator*> (proc.fft_size / 2 + 1);
-    for (auto& mediator : proc.horizontal_mediators)
-        mediator = MediatorNew (*proc.arena, proc.kernel_size);
+    proc.horizontal_medians = proc.arena->make_span<Median*> (proc.fft_size / 2 + 1);
+    for (auto& mediator : proc.horizontal_medians)
+        mediator = Median::create (*proc.arena, proc.kernel_size);
 
     proc.arena_frame = proc.arena->create_frame();
 
@@ -142,24 +142,23 @@ std::span<float> generate_percussive_mask (HPSS_Processor& proc, std::span<const
 
 #if 1
     const auto frame = proc.arena->create_frame();
-    auto* mediator = MediatorNew (*proc.arena, proc.kernel_size);
+    auto* median = Median::create (*proc.arena, proc.kernel_size);
 
     for (int n = 0; n < half_kernel; ++n)
     {
-        MediatorInsert (mediator, fft_abs_data[n]);
+        median->push_and_return (fft_abs_data[n]);
     }
 
     int n;
     for (n = 0; n < proc.fft_size / 2 + 1 - half_kernel; ++n)
     {
-        MediatorInsert (mediator, fft_abs_data[n + half_kernel]);
-        percussive_mask[n] = MediatorMedian (mediator);
+        percussive_mask[n] = median->push_and_return (fft_abs_data[n + half_kernel]);
     }
 
     for (; n < proc.fft_size / 2 + 1; ++n)
     {
-        MediatorInsert (mediator, n % 2 ? 0.0f : 10000.0f);
-        percussive_mask[n] = MediatorMedian (mediator);
+        // alternate big and small to preserve median
+        percussive_mask[n] = median->push_and_return (n % 2 ? 0.0f : 10000.0f);
     }
 #else
     for (int n = 0; n < proc.fft_size / 2 + 1; ++n)
@@ -186,8 +185,7 @@ std::span<float> generate_harmonic_mask (HPSS_Processor& proc, std::span<const f
     for (int n = 0; n < proc.fft_size / 2 + 1; ++n)
     {
 #if 1
-        MediatorInsert (proc.horizontal_mediators[n], fft_abs_data[n]);
-        harmonic_mask[n] = MediatorMedian (proc.horizontal_mediators[n]);
+        harmonic_mask[n] = proc.horizontal_medians[n]->push_and_return (fft_abs_data[n]);
 #else
         const auto median_element = (proc.kernel_size / 2) + 1;
 
@@ -332,5 +330,3 @@ std::pair<std::span<float>, std::span<float>> process_hop (HPSS_Processor& proc,
     return { hop_harmonic, hop_percussive };
 }
 } // namespace hpss
-
-#include "util/mediator.cpp"

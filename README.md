@@ -98,14 +98,12 @@ The FFT is computed using [`chowdsp_fft`](https://github.com/Chowdhury-DSP/chowd
 ## Future Improvements
 
 - Currently the slowest part of the algorithm is the median
-  computation. The algorithm currently being used for median
-  computation is quite general, so it may be possible to perform
-  some use-case-specific optimizations.
+  computation. There's probably some ways that we can improve on it.
 - It would be nice to either support more FFT backends (FFTW,
   Accelerate, etc), or allow the user to provide their own FFT backend.
 - I've experimented with some SIMD optimizations, but have abandoned
   them for now, as I was not seeing a measurable performance improvement.
-  However, it would be nice to take another shot at some point! 
+  However, it would be nice to take another shot at some point!
 
 ## LICENSE
 

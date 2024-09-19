@@ -20,7 +20,6 @@ struct Mediator
 int MediatorSizeBytes (int nItems);
 
 //creates new Mediator: to calculate `nItems` running median.
-//mallocs single block of memory, caller must free.
 Mediator* MediatorNew (Memory_Arena<>& arena, int nItems);
 
 //Inserts item, maintains median in O(lg nItems)

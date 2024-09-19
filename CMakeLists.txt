@@ -37,4 +37,7 @@ if(HPSS_BUILD_TESTS)
     )
     add_executable(hpss_test test/test.cpp)
     target_link_libraries(hpss_test PRIVATE hpss sndfile)
+
+    add_executable(median_test test/median_test.cpp)
+    target_link_libraries(median_test PRIVATE hpss)
 endif()

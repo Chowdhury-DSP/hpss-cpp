@@ -32,7 +32,7 @@ struct Params
 };
 
 // Forward declaration
-struct Mediator;
+struct Median;
 
 /** HPSS computation state and pre-computed data. */
 struct HPSS_Processor
@@ -55,7 +55,7 @@ struct HPSS_Processor
     std::span<float> last_half_window_harm;
     std::span<float> last_half_window_perc;
 
-    std::span<Mediator*> horizontal_mediators;
+    std::span<Median*> horizontal_medians;
 };
 
 using complex = std::complex<float>;
