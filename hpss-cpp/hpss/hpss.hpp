@@ -27,7 +27,7 @@ struct Params
     int window_size = 1 << 11; // integer power of 2
     int hop_factor = 2; // integer power of 2 (right now only 1 and 2 are allowed)
     int zero_pad = 2; // integer power of 2
-    int kernel_size = 17; // must be odd
+    int kernel_size = 17; // size of the median filter kernel, must be odd
     int mask_power = 2; // [0, 16] (usually either one or two)
 };
 
