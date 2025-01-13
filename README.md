@@ -2,7 +2,7 @@
 
 This repository contains a C++ library for computing
 [harmonic-percussive source separation](https://www.audiolabs-erlangen.de/resources/MIR/FMP/C8/C8S1_HPS.html).
-The library intends to provide fast and high-quality source
+The library intends to provide fast and high-quality
 separation, while also remaining suitable for real-time use-cases.
 
 ## Compilation
@@ -90,8 +90,8 @@ The test program will generate 4 files:
 The main algorithm being implemented is based on Derry Fitzgerald's
 paper from DAFx10 ["Harmonic/Percussive Separation Using Median Filtering"](https://arrow.tudublin.ie/cgi/viewcontent.cgi?article=1078&context=argcon).
 
-The median computation is implemented using a min-max heap
-algorithm adapted from https://ideone.com/8VVEa (MIT license).
+The median filtering algorithm implemented in this library
+is inspired by https://ideone.com/8VVEa (MIT license).
 
 The FFT is computed using [`chowdsp_fft`](https://github.com/Chowdhury-DSP/chowdsp_fft).
 
