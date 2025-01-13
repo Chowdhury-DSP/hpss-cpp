@@ -20,7 +20,7 @@ target_link_libraries(MyCoolProject PRIVATE hpss)
 ### Using the Simple API
 
 After initializing a processor, you may process your signal
-by repeatedly calling `hpss::process_window()`.
+by repeatedly calling `hpss::process_hop()`.
 
 ```cpp
 #include <hpss/hpss.cpp>
@@ -37,7 +37,7 @@ const hpss::Params params {
 auto processor = hpss::init (params);
 
 // Process one "hop" of audio data
-const auto [harmonic_out, percussive_out] = hpss::process_window (processor, window);
+const auto [harmonic_out, percussive_out] = hpss::process_hop (processor, hop);
 
 // De-initialize the processor
 hpss::deinit (processor);
