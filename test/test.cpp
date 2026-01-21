@@ -43,7 +43,15 @@ int main (int argc, char* argv[])
     const auto start_sample = int ((float) fs * start_seconds);
     const auto num_samples = std::min (int ((float) fs * num_seconds), (int) sf_info.frames - start_sample);
     for (auto& channel : ref_signal)
+    {
         channel = channel.subspan (start_sample, num_samples);
+        // int n = 0;
+        // for (auto& x : channel)
+        // {
+        //     x = std::sin (2.0f * M_PI * 250.0 / fs * (float) n);
+        //     n++;
+        // }
+    }
 
     const auto harmonic_signal = wav_io::make_buffer (arena, num_channels, num_samples);
     const auto percussive_signal = wav_io::make_buffer (arena, num_channels, num_samples);
@@ -51,7 +59,7 @@ int main (int argc, char* argv[])
 
     const hpss::Params params {
         .window_size = 1 << 12,
-        .hop_factor = 2,
+        .hop_factor = 4,
         .zero_pad = 2,
         .mask_power = 2,
     };
@@ -78,6 +86,12 @@ int main (int argc, char* argv[])
         }
 
         sample_count += hpss_procs[0].hop_size;
+    }
+    for (int channel = 0; channel < num_channels; ++channel)
+    {
+        std::fill (harmonic_signal[channel].begin() + sample_count, harmonic_signal[channel].end(), 0.0f);
+        std::fill (percussive_signal[channel].begin() + sample_count, percussive_signal[channel].end(), 0.0f);
+        std::fill (sum_signal[channel].begin() + sample_count, sum_signal[channel].end(), 0.0f);
     }
 
     const auto duration = std::chrono::high_resolution_clock::now() - start;

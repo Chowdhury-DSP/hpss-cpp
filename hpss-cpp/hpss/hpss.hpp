@@ -25,7 +25,7 @@ namespace hpss
 struct Params
 {
     int window_size = 1 << 11; // integer power of 2
-    int hop_factor = 2; // integer power of 2 (right now only 1 and 2 are allowed)
+    int hop_factor = 2; // integer power of 2, that divides the window size evenly (usually 1, 2, or 4)
     int zero_pad = 2; // integer power of 2
     int kernel_size = 17; // size of the median filter kernel, must be odd
     int mask_power = 2; // [0, 16] (usually either one or two)
@@ -52,8 +52,10 @@ struct HPSS_Processor
 
     std::span<float> hann_window;
     std::span<float> window_in;
-    std::span<float> last_half_window_harm;
-    std::span<float> last_half_window_perc;
+    std::span<float> leftover_windows_harm;
+    std::span<float> leftover_windows_perc;
+    int leftover_idx_harm {};
+    int leftover_idx_perc {};
 
     std::span<Median*> horizontal_medians;
 };

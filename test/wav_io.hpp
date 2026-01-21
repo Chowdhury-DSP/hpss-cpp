@@ -54,9 +54,31 @@ inline Buffer load_file (const char* file, SF_INFO& sf_info, hpss::Memory_Arena<
     return buffer;
 }
 
+inline void normalize (const Buffer& buffer)
+{
+    float max = 0.0f;
+    for (const auto& channel : buffer)
+    {
+        for (auto x : channel)
+            max = std::max (std::abs (x), max);
+    }
+
+    if (max > 1.0f)
+    {
+        const auto gain = 1.0f / max;
+        for (const auto& channel : buffer)
+        {
+            for (auto& x : channel)
+                x *= gain;
+        }
+    }
+}
+
 inline void write_file (const char* file, const Buffer& audio, SF_INFO& sf_info, hpss::Memory_Arena<>& arena)
 {
     std::cout << "Writing to file: " << file << std::endl;
+
+    normalize (audio);
 
     const auto channels = (int) audio.size();
     const auto frames = (sf_count_t) audio[0].size();

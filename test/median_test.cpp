@@ -3,9 +3,9 @@
 #include <random>
 
 #include <hpss/util/memory_arena.hpp>
+#include <hpss/util/median.hpp>
 
 #include "heap_mediator/mediator.hpp"
-
 #include "heap_mediator/mediator.cpp"
 
 static constexpr int N = 17;
@@ -145,7 +145,7 @@ int main()
     {
         auto* mediator = hpss::MediatorNew (arena, N);
         Median_Naive median_naive {};
-        Median median { arena, N };
+        hpss::Median median { arena, N };
 
         std::array<float, M> data { 1.0f, 3.0f, 2.0f, -1.0f, 10.0f, 9.0f, 18.0f, -20.0f, 0.0f, 1.0f };
         std::array<float, M> ref {};
@@ -170,7 +170,7 @@ int main()
     {
         auto* mediator = hpss::MediatorNew (arena, N);
         Median_Naive median_naive {};
-        Median median { arena, N };
+        hpss::Median median { arena, N };
         Median_New median_new { arena, N };
 
         std::vector<float> data {};

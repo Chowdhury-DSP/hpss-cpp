@@ -1,6 +1,6 @@
 #pragma once
 
-#include "memory_arena.hpp"
+#include <hpss/util/memory_arena.hpp>
 
 namespace hpss
 {

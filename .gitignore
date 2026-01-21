@@ -3,6 +3,9 @@ cmake-build-*/
 
 .vscode/
 .idea/
+.zed/
+.focus-config
+*.raddbg_project
 
 *.wav
 *.mp3

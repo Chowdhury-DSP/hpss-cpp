@@ -7,7 +7,6 @@
 
 #include "util/median.hpp"
 #include "util/power.hpp"
-// #include "util/pffft_wrapper.hpp"
 #include <chowdsp_fft.h>
 
 namespace hpss
@@ -23,11 +22,12 @@ HPSS_Processor init (Params params)
     proc.mask_power = params.mask_power;
     proc.use_squares = proc.mask_power > 2 && proc.mask_power % 2 == 0;
 
+    const auto leftover_windows_size = (params.hop_factor - 1) * (proc.window_size - proc.hop_size);
     const auto mediator_size = Median::bytes_required (proc.kernel_size);
     proc.arena = new Memory_Arena<> {
         1 * proc.fft_size * sizeof (complex)
         + 3 * proc.window_size * sizeof (float)
-        + 2 * (proc.window_size / 2) * sizeof (float)
+        + 2 * leftover_windows_size * sizeof (float)
         + 2 * proc.hop_size * sizeof (float)
         + 5 * (proc.fft_size / 2 + 8) * sizeof (float)
         + (proc.fft_size / 2 + 1) * (mediator_size + 16)
@@ -37,19 +37,20 @@ HPSS_Processor init (Params params)
     proc.fft_setup = chowdsp::fft::fft_new_setup (proc.fft_size, chowdsp::fft::FFT_REAL);
     proc.fft_io_data = static_cast<float*> (chowdsp::fft::aligned_malloc (2 * proc.fft_size * sizeof (complex)));
 
+    const auto window_gain = params.hop_factor == 1 ? 1.0f : (2.0f / (float) params.hop_factor);
     proc.hann_window = proc.arena->make_span<float> (proc.window_size, 32);
     for (int n = 0; n < proc.window_size; ++n)
     {
         const auto sine = std::sin ((float) n * (float) M_PI / (float) proc.window_size);
-        proc.hann_window[n] = sine * sine;
+        proc.hann_window[n] = window_gain * sine * sine;
     }
 
     proc.window_in = proc.arena->make_span<float> (proc.window_size, 32);
     std::fill (proc.window_in.begin(), proc.window_in.end(), 0.0f);
-    proc.last_half_window_harm = proc.arena->make_span<float> (proc.window_size / 2, 32);
-    std::fill (proc.last_half_window_harm.begin(), proc.last_half_window_harm.end(), 0.0f);
-    proc.last_half_window_perc = proc.arena->make_span<float> (proc.window_size / 2, 32);
-    std::fill (proc.last_half_window_harm.begin(), proc.last_half_window_harm.end(), 0.0f);
+    proc.leftover_windows_harm = proc.arena->make_span<float> (leftover_windows_size, 32);
+    std::fill (proc.leftover_windows_harm.begin(), proc.leftover_windows_harm.end(), 0.0f);
+    proc.leftover_windows_perc = proc.arena->make_span<float> (leftover_windows_size, 32);
+    std::fill (proc.leftover_windows_perc.begin(), proc.leftover_windows_perc.end(), 0.0f);
 
     proc.horizontal_medians = proc.arena->make_span<Median*> (proc.fft_size / 2 + 1);
     for (auto& mediator : proc.horizontal_medians)
@@ -268,7 +269,10 @@ std::span<complex> apply_spectral_mask (HPSS_Processor& proc, std::span<const co
     return spectrum_out;
 }
 
-std::span<float> overlap_add (HPSS_Processor& proc, std::span<const float> window, std::span<float> last_half_window)
+std::span<float> overlap_add (HPSS_Processor& proc,
+                              std::span<float> window,
+                              std::span<float> leftover_windows,
+                              int& leftover_idx)
 {
     const auto hop_out = proc.arena->make_span<float> (proc.hop_size, 32);
     if (proc.hop_size == proc.window_size)
@@ -280,13 +284,32 @@ std::span<float> overlap_add (HPSS_Processor& proc, std::span<const float> windo
         for (int n = 0; n < proc.hop_size; ++n)
         {
             hop_out[n] = window[n] * proc.hann_window[n];
-            hop_out[n] += last_half_window[n] * proc.hann_window[n + proc.hop_size];
+            hop_out[n] += leftover_windows[n] * proc.hann_window[proc.hop_size + n];
         }
-        std::copy (window.begin() + proc.hop_size, window.end(), last_half_window.begin());
+        std::copy (window.begin() + proc.hop_size, window.end(), leftover_windows.begin());
     }
     else
     {
-        assert (false); // @TODO!
+        for (int n = 0; n < proc.hop_size; ++n)
+            hop_out[n] = window[n] * proc.hann_window[n];
+
+        const auto hop_factor = proc.window_size / proc.hop_size;
+        const auto leftover_size = proc.window_size - proc.hop_size;
+        for (int hop_idx = 0; hop_idx < hop_factor - 1; ++hop_idx)
+        {
+            const auto lop_idx = (hop_idx + leftover_idx) % (hop_factor - 1);
+            const auto leftover_window = leftover_windows.subspan (lop_idx * leftover_size, leftover_size);
+
+            const auto lop_offset = leftover_size - (hop_idx + 1) * proc.hop_size;
+            const auto hann_offset = proc.window_size - (hop_idx + 1) * proc.hop_size;
+            for (int n = 0; n < proc.hop_size; ++n)
+                hop_out[n] += leftover_window[lop_offset + n] * proc.hann_window[hann_offset + n];
+
+            if (hop_idx == 0)
+                std::copy (window.begin() + proc.hop_size, window.end(), leftover_window.begin());
+        }
+
+        leftover_idx = (leftover_idx + 1) % (hop_factor - 1);
     }
 
     return hop_out;
@@ -300,9 +323,23 @@ void push_new_hop (HPSS_Processor& proc, std::span<const float> hop_data)
     {
         std::copy (hop_data.begin(), hop_data.end(), proc.window_in.begin());
     }
-    else
+    else if (proc.hop_size == proc.window_size / 2)
     {
         std::copy (proc.window_in.begin() + proc.hop_size, proc.window_in.end(), proc.window_in.begin());
+        std::copy (hop_data.begin(), hop_data.end(), proc.window_in.begin() + proc.hop_size);
+    }
+    else
+    {
+        // We could use the sample logic as in the case above,
+        // but we need this extra logic to avoid memory aliasing.
+        const auto hop_factor = proc.window_size / proc.hop_size;
+        for (int hop_idx = 0; hop_idx < hop_factor - 1; ++hop_idx)
+        {
+            std::copy (proc.window_in.begin() + (hop_idx + 1) * proc.hop_size,
+                       proc.window_in.begin() + (hop_idx + 2) * proc.hop_size,
+                       proc.window_in.begin() + hop_idx * proc.hop_size);
+        }
+
         std::copy (hop_data.begin(), hop_data.end(), proc.window_in.begin() + (proc.window_size - proc.hop_size));
     }
 }
@@ -324,8 +361,8 @@ std::pair<std::span<float>, std::span<float>> process_hop (HPSS_Processor& proc,
     const auto percussive_spectrum = apply_spectral_mask (proc, fft_frame, percussive_mask);
     const auto percussive_out = process_inverse_fft (proc, percussive_spectrum);
 
-    const auto hop_harmonic = overlap_add (proc, harmonic_out, proc.last_half_window_harm);
-    const auto hop_percussive = overlap_add (proc, percussive_out, proc.last_half_window_perc);
+    const auto hop_harmonic = overlap_add (proc, harmonic_out, proc.leftover_windows_harm, proc.leftover_idx_harm);
+    const auto hop_percussive = overlap_add (proc, percussive_out, proc.leftover_windows_perc, proc.leftover_idx_perc);
 
     return { hop_harmonic, hop_percussive };
 }
