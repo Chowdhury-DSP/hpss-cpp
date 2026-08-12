@@ -12,7 +12,7 @@ struct Median
     Idx_Type ptr = {};
     Idx_Type window_size = {};
 
-    Median (Memory_Arena<>& arena, int num)
+    Median (Memory_Arena& arena, int num)
     {
         window = arena.allocate<float> (num, 16);
         idxs = arena.allocate<Idx_Type> (num, 16);
@@ -31,7 +31,7 @@ struct Median
         return sizeof(Median) + num * (sizeof (float) + sizeof (Idx_Type)) + 16;
     }
 
-    static Median* create (Memory_Arena<>& arena, int num)
+    static Median* create (Memory_Arena& arena, int num)
     {
         return new (arena.allocate_bytes (sizeof (Median), alignof (Median))) Median { arena, num };
     }

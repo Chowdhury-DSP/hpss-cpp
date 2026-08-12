@@ -3,8 +3,8 @@
 #include <cassert>
 #include <cstddef>
 #include <span>
-#include <sstream>
-#include <vector>
+
+#include <chowdsp_fft.h>
 
 namespace hpss
 {
@@ -22,30 +22,57 @@ Type* snap_pointer_to_alignment (Type* base_pointer,
 static constexpr int default_byte_alignment = 16;
 
 /**
- * A simple memory arena. By default the arena will be
- * backed with a vector of bytes, but the underlying
- * memory resource can be changed via the template argument.
+ * A simple memory arena, backed by a span of bytes.
+ *
+ * By default, the arena owns its memory. Alternatively,
+ * set_memory_resource() points the arena at externally-owned memory.
  */
-template <typename MemoryResourceType = std::vector<std::byte>>
 class Memory_Arena
 {
 public:
     Memory_Arena() = default;
 
-    /** Constructs the arena with an initial allocated size. */
+    /** Constructs the arena with an initial allocated size, owned by this arena. */
     explicit Memory_Arena (size_t size_in_bytes) { reset (size_in_bytes); }
 
     Memory_Arena (const Memory_Arena&) = delete;
     Memory_Arena& operator= (const Memory_Arena&) = delete;
 
-    Memory_Arena (Memory_Arena&&) noexcept = default;
-    Memory_Arena& operator= (Memory_Arena&&) noexcept = default;
+    Memory_Arena (Memory_Arena&& other) noexcept { *this = std::move (other); }
+    Memory_Arena& operator= (Memory_Arena&& other) noexcept
+    {
+        free_owned_memory();
+        raw_data = other.raw_data;
+        bytes_used = other.bytes_used;
+        owns_memory = other.owns_memory;
+        other.raw_data = {};
+        other.bytes_used = 0;
+        other.owns_memory = false;
+        return *this;
+    }
 
-    /** Re-allocates the internal buffer with a given number of bytes */
+    ~Memory_Arena() { free_owned_memory(); }
+
+    /** (Re-)allocates the internal buffer with a given number of bytes, owned by this arena. */
     void reset (size_t new_size_bytes)
     {
-        clear();
-        raw_data.resize (new_size_bytes, std::byte {});
+        free_owned_memory();
+        auto* memory = static_cast<std::byte*> (chowdsp::fft::aligned_malloc (new_size_bytes));
+        raw_data = { memory, new_size_bytes };
+        owns_memory = true;
+        bytes_used = 0;
+    }
+
+    /**
+     * Points this arena at externally-owned memory.
+     * The caller is responsible for managing the lifetime of this memory.
+     */
+    void set_memory_resource (std::span<std::byte> external_memory) noexcept
+    {
+        free_owned_memory();
+        raw_data = external_memory;
+        owns_memory = false;
+        bytes_used = 0;
     }
 
     /**
@@ -55,7 +82,7 @@ public:
     void clear() noexcept
     {
 #if DEBUG
-        std::fill (raw_data.begin(), raw_data.begin() + bytes_used, std::byte { 0xDD });
+        std::fill (raw_data.begin(), raw_data.begin() + (std::ptrdiff_t) bytes_used, std::byte { 0xDD });
 #endif
         bytes_used = 0;
     }
@@ -124,7 +151,11 @@ public:
         explicit Frame (Memory_Arena& allocator)
             : alloc (&allocator), bytes_used_at_start (alloc->bytes_used) {}
 
-        ~Frame() { alloc->bytes_used = bytes_used_at_start; }
+        ~Frame()
+        {
+            if (alloc != nullptr)
+                alloc->bytes_used = bytes_used_at_start;
+        }
 
         Memory_Arena* alloc = nullptr;
         size_t bytes_used_at_start = 0;
@@ -140,7 +171,16 @@ public:
     }
 
 private:
-    MemoryResourceType raw_data {};
+    void free_owned_memory() noexcept
+    {
+        if (owns_memory && raw_data.data() != nullptr)
+            chowdsp::fft::aligned_free (raw_data.data());
+        raw_data = {};
+        owns_memory = false;
+    }
+
+    std::span<std::byte> raw_data {};
     size_t bytes_used = 0;
+    bool owns_memory = false;
 };
 } // namespace hpss

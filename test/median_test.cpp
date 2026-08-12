@@ -65,7 +65,7 @@ struct Median_New
     Idx_Type ptr = {};
     Idx_Type window_size = {};
 
-    Median_New (hpss::Memory_Arena<>& arena, int num)
+    Median_New (hpss::Memory_Arena& arena, int num)
     {
         window = arena.allocate<float> (num, 16);
         idxs = arena.allocate<Idx_Type> (num, 16);
@@ -141,7 +141,7 @@ int main()
 {
     std::cout << "Median test" << std::endl;
 
-    hpss::Memory_Arena<> arena { 4096 };
+    hpss::Memory_Arena arena { 4096 };
     {
         auto* mediator = hpss::MediatorNew (arena, N);
         Median_Naive median_naive {};

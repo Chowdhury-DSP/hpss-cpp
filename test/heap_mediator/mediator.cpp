@@ -92,7 +92,7 @@ int MediatorSizeBytes (int nItems)
 
 //creates new Mediator: to calculate `nItems` running median.
 //mallocs single block of memory, caller must free.
-inline Mediator* MediatorNew (Memory_Arena<>& arena, int nItems)
+inline Mediator* MediatorNew (Memory_Arena& arena, int nItems)
 {
     int size = sizeof (Mediator) + nItems * (sizeof (Item) + sizeof (int) * 2);
     Mediator* m = static_cast<Mediator*> (arena.allocate_bytes (size));

@@ -33,7 +33,7 @@ int main (int argc, char* argv[])
     if (argc >= 4)
         start_seconds = (float) std::atof (argv[3]);
 
-    hpss::Memory_Arena<> arena { 1 << 29 };
+    hpss::Memory_Arena arena { 1 << 29 };
     SF_INFO sf_info;
     auto ref_signal = wav_io::load_file (test_file.c_str(), sf_info, arena);
     const auto fs = sf_info.samplerate;

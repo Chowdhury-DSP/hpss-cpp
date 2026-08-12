@@ -22,7 +22,7 @@ if(NOT TARGET chowdsp_fft)
         GITHUB_REPOSITORY Chowdhury-DSP/chowdsp_fft
     )
 endif()
-target_link_libraries(hpss PRIVATE chowdsp_fft)
+target_link_libraries(hpss PUBLIC chowdsp_fft)
 
 ## Tests ##
 option(HPSS_BUILD_TESTS OFF)

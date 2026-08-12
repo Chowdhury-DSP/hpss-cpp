@@ -24,7 +24,7 @@ HPSS_Processor init (Params params)
 
     const auto leftover_windows_size = (params.hop_factor - 1) * (proc.window_size - proc.hop_size);
     const auto mediator_size = Median::bytes_required (proc.kernel_size);
-    proc.arena = new Memory_Arena<> {
+    proc.arena = new Memory_Arena {
         1 * proc.fft_size * sizeof (complex)
         + 3 * proc.window_size * sizeof (float)
         + 2 * leftover_windows_size * sizeof (float)

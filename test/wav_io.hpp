@@ -14,7 +14,7 @@
 namespace wav_io
 {
 using Buffer = std::span<std::span<float>>;
-inline Buffer make_buffer (hpss::Memory_Arena<>& arena, int num_channels, int num_samples)
+inline Buffer make_buffer (hpss::Memory_Arena& arena, int num_channels, int num_samples)
 {
     auto* data = arena.allocate<float> (num_channels * num_samples);
     auto buffer = arena.make_span<std::span<float>> (num_channels);
@@ -25,7 +25,7 @@ inline Buffer make_buffer (hpss::Memory_Arena<>& arena, int num_channels, int nu
 
 using SND_PTR = std::unique_ptr<SNDFILE, decltype (&sf_close)>;
 
-inline Buffer load_file (const char* file, SF_INFO& sf_info, hpss::Memory_Arena<>& arena)
+inline Buffer load_file (const char* file, SF_INFO& sf_info, hpss::Memory_Arena& arena)
 {
     std::cout << "Loading file: " << file << std::endl;
 
@@ -74,7 +74,7 @@ inline void normalize (const Buffer& buffer)
     }
 }
 
-inline void write_file (const char* file, const Buffer& audio, SF_INFO& sf_info, hpss::Memory_Arena<>& arena)
+inline void write_file (const char* file, const Buffer& audio, SF_INFO& sf_info, hpss::Memory_Arena& arena)
 {
     std::cout << "Writing to file: " << file << std::endl;
 

@@ -37,8 +37,8 @@ struct Median;
 /** HPSS computation state and pre-computed data. */
 struct HPSS_Processor
 {
-    Memory_Arena<>* arena = nullptr;
-    Memory_Arena<>::Frame arena_frame;
+    Memory_Arena* arena = nullptr;
+    Memory_Arena::Frame arena_frame;
 
     int window_size = 0;
     int hop_size = 0;

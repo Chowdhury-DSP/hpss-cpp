@@ -20,7 +20,7 @@ struct Mediator
 int MediatorSizeBytes (int nItems);
 
 //creates new Mediator: to calculate `nItems` running median.
-Mediator* MediatorNew (Memory_Arena<>& arena, int nItems);
+Mediator* MediatorNew (Memory_Arena& arena, int nItems);
 
 //Inserts item, maintains median in O(lg nItems)
 void MediatorInsert (Mediator* m, Item v);
