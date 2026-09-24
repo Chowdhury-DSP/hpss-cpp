@@ -40,4 +40,7 @@ if(HPSS_BUILD_TESTS)
 
     add_executable(median_test test/median_test.cpp)
     target_link_libraries(median_test PRIVATE hpss)
+
+    add_executable(mask_test test/mask_test.cpp)
+    target_link_libraries(mask_test PRIVATE hpss)
 endif()

@@ -12,28 +12,36 @@ struct Median
     Idx_Type ptr = {};
     Idx_Type window_size = {};
 
-    Median (Memory_Arena& arena, int num)
+    void init (Memory_Arena& arena, int num)
     {
         window = arena.allocate<float> (num, 16);
         idxs = arena.allocate<Idx_Type> (num, 16);
         ptr = num / 2;
         window_size = num;
 
+        init();
+    }
+
+    void init()
+    {
         for (Idx_Type i = 0; i < window_size; ++i)
             idxs[i] = i;
 
-        std::fill (window, window + num / 2, std::numeric_limits<float>::lowest());
-        std::fill (window + num / 2, window + window_size, std::numeric_limits<float>::max());
+        std::fill (window, window + window_size / 2, std::numeric_limits<float>::lowest());
+        std::fill (window + window_size / 2, window + window_size, std::numeric_limits<float>::max());
     }
 
+    // includes the worst-case padding for create()'s three allocations
     static size_t bytes_required (int num)
     {
-        return sizeof(Median) + num * (sizeof (float) + sizeof (Idx_Type)) + 16;
+        return sizeof (Median) + alignof (Median) + (size_t) num * (sizeof (float) + sizeof (Idx_Type)) + 2 * 16;
     }
 
     static Median* create (Memory_Arena& arena, int num)
     {
-        return new (arena.allocate_bytes (sizeof (Median), alignof (Median))) Median { arena, num };
+        auto* median = (Median*) arena.allocate_bytes (sizeof (Median), alignof (Median));
+        median->init (arena, num);
+        return median;
     }
 
     float push_and_return (float x)

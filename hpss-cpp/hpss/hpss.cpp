@@ -11,6 +11,16 @@
 
 namespace hpss
 {
+static Median get_harmonic_median (HPSS_Processor& proc, int bin)
+{
+    return {
+        .window = proc.median_windows.data() + bin * proc.harmonic_kernel_size,
+        .idxs = proc.median_idxs.data() + bin * proc.harmonic_kernel_size,
+        .ptr = proc.median_ptr,
+        .window_size = proc.harmonic_kernel_size,
+    };
+}
+
 HPSS_Processor init (Params params)
 {
     HPSS_Processor proc {};
@@ -18,19 +28,20 @@ HPSS_Processor init (Params params)
     proc.window_size = params.window_size;
     proc.hop_size = params.window_size / params.hop_factor;
     proc.fft_size = params.window_size * params.zero_pad;
-    proc.kernel_size = params.kernel_size;
+    proc.harmonic_kernel_size = params.harmonic_kernel_size;
+    proc.percussive_kernel_size = params.percussive_kernel_size;
     proc.mask_power = params.mask_power;
     proc.use_squares = proc.mask_power > 2 && proc.mask_power % 2 == 0;
 
     const auto leftover_windows_size = (params.hop_factor - 1) * (proc.window_size - proc.hop_size);
-    const auto mediator_size = Median::bytes_required (proc.kernel_size);
+    const auto medians_count = proc.fft_size / 2 + 1;
     proc.arena = new Memory_Arena {
         1 * proc.fft_size * sizeof (complex)
         + 3 * proc.window_size * sizeof (float)
         + 2 * leftover_windows_size * sizeof (float)
         + 2 * proc.hop_size * sizeof (float)
         + 5 * (proc.fft_size / 2 + 8) * sizeof (float)
-        + (proc.fft_size / 2 + 1) * (mediator_size + 16)
+        + medians_count * proc.harmonic_kernel_size * (sizeof (float) + sizeof (int32_t))
         + 2048
     };
 
@@ -52,9 +63,9 @@ HPSS_Processor init (Params params)
     proc.leftover_windows_perc = proc.arena->make_span<float> (leftover_windows_size, 32);
     std::fill (proc.leftover_windows_perc.begin(), proc.leftover_windows_perc.end(), 0.0f);
 
-    proc.horizontal_medians = proc.arena->make_span<Median*> (proc.fft_size / 2 + 1);
-    for (auto& mediator : proc.horizontal_medians)
-        mediator = Median::create (*proc.arena, proc.kernel_size);
+    proc.median_windows = proc.arena->make_span<float> (medians_count * proc.harmonic_kernel_size);
+    proc.median_idxs = proc.arena->make_span<int32_t> (medians_count * proc.harmonic_kernel_size);
+    reset_harmonic_medians (proc);
 
     proc.arena_frame = proc.arena->create_frame();
 
@@ -66,7 +77,15 @@ void deinit (HPSS_Processor& proc)
     chowdsp::fft::aligned_free (proc.fft_io_data);
     chowdsp::fft::fft_destroy_setup (proc.fft_setup);
 
+    proc.arena_frame = {};
     delete proc.arena;
+}
+
+void reset_harmonic_medians (HPSS_Processor& proc)
+{
+    for (int n = 0; n < proc.fft_size / 2 + 1; ++n)
+        get_harmonic_median (proc, n).init();
+    proc.median_ptr = proc.harmonic_kernel_size / 2;
 }
 
 std::span<complex> process_forward_fft (HPSS_Processor& proc, std::span<const float> window_data)
@@ -138,45 +157,40 @@ std::span<float> process_inverse_fft (HPSS_Processor& proc, std::span<const comp
 
 std::span<float> generate_percussive_mask (HPSS_Processor& proc, std::span<const float> fft_abs_data)
 {
-    const auto half_kernel = proc.kernel_size / 2;
-    const auto percussive_mask = proc.arena->make_span<float> (proc.fft_size / 2 + 1, 32);
+    const auto num_bins = proc.fft_size / 2 + 1;
+    const auto kernel_size = proc.percussive_kernel_size;
+    const auto half_kernel = kernel_size / 2;
+    assert (num_bins >= kernel_size);
 
-#if 1
+    const auto percussive_mask = proc.arena->make_span<float> (num_bins, 32);
     const auto frame = proc.arena->create_frame();
-    auto* median = Median::create (*proc.arena, proc.kernel_size);
+
+    // Near the edges, take the median of whichever bins are in range.
+    const auto edge_scratch = proc.arena->make_span<float> (kernel_size);
+    const auto truncated_median = [&] (int n)
+    {
+        const auto start = std::max (n - half_kernel, 0);
+        const auto end = std::min (n + half_kernel + 1, num_bins);
+        const auto temp = edge_scratch.first ((size_t) (end - start));
+        std::copy (fft_abs_data.begin() + start, fft_abs_data.begin() + end, temp.begin());
+        std::nth_element (temp.begin(), temp.begin() + (std::ptrdiff_t) temp.size() / 2, temp.end());
+        return temp[temp.size() / 2];
+    };
 
     for (int n = 0; n < half_kernel; ++n)
     {
+        percussive_mask[n] = truncated_median (n);
+        percussive_mask[num_bins - 1 - n] = truncated_median (num_bins - 1 - n);
+    }
+
+    // After kernel_size pushes, the median's window holds only real bins.
+    auto* median = Median::create (*proc.arena, kernel_size);
+    for (int n = 0; n < kernel_size - 1; ++n)
         median->push_and_return (fft_abs_data[n]);
-    }
 
-    int n;
-    for (n = 0; n < proc.fft_size / 2 + 1 - half_kernel; ++n)
-    {
+    for (int n = half_kernel; n < num_bins - half_kernel; ++n)
         percussive_mask[n] = median->push_and_return (fft_abs_data[n + half_kernel]);
-    }
 
-    for (; n < proc.fft_size / 2 + 1; ++n)
-    {
-        // alternate big and small to preserve median
-        percussive_mask[n] = median->push_and_return (n % 2 ? 0.0f : 10000.0f);
-    }
-#else
-    for (int n = 0; n < proc.fft_size / 2 + 1; ++n)
-    {
-        const auto start_index = std::max (n - half_kernel, 0);
-        const auto end_index = std::min (n + half_kernel, proc.fft_size / 2) + 1;
-        const auto median_count = end_index - start_index;
-        const auto median_element = median_count / 2;
-
-        const auto _ = proc.arena->create_frame();
-        const auto temp_data = proc.arena->make_span<float> (median_count);
-        std::copy (fft_abs_data.begin() + start_index, fft_abs_data.begin() + start_index + median_count, temp_data.begin());
-
-        std::nth_element (temp_data.begin(), temp_data.begin() + median_element, temp_data.end());
-        percussive_mask[n] = temp_data[median_element];
-    }
-#endif
     return percussive_mask;
 }
 
@@ -184,22 +198,9 @@ std::span<float> generate_harmonic_mask (HPSS_Processor& proc, std::span<const f
 {
     const auto harmonic_mask = proc.arena->make_span<float> (proc.fft_size / 2 + 1, 32);
     for (int n = 0; n < proc.fft_size / 2 + 1; ++n)
-    {
-#if 1
-        harmonic_mask[n] = proc.horizontal_medians[n]->push_and_return (fft_abs_data[n]);
-#else
-        const auto median_element = (proc.kernel_size / 2) + 1;
+        harmonic_mask[n] = get_harmonic_median (proc, n).push_and_return (fft_abs_data[n]);
 
-        const auto _ = proc.arena->create_frame();
-        const auto temp_data = proc.arena->make_span<float> (proc.kernel_size);
-
-        for (int k = 0; k < proc.kernel_size; ++k)
-            temp_data[k] = proc.fft_history[k][n];
-
-        std::nth_element (temp_data.begin(), temp_data.begin() + median_element, temp_data.end());
-        harmonic_mask[n] = temp_data[median_element];
-#endif
-    }
+    proc.median_ptr = (proc.median_ptr == proc.harmonic_kernel_size - 1) ? 0 : proc.median_ptr + 1;
     return harmonic_mask;
 }
 

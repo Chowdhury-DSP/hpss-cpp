@@ -60,18 +60,22 @@ struct Median_Naive
 struct Median_New
 {
     using Idx_Type = int32_t;
-    float* window {};
-    Idx_Type* idxs {};
+    void* data {};
+    // float* window {};
+    // Idx_Type* idxs {};
     Idx_Type ptr = {};
     Idx_Type window_size = {};
 
     Median_New (hpss::Memory_Arena& arena, int num)
     {
-        window = arena.allocate<float> (num, 16);
-        idxs = arena.allocate<Idx_Type> (num, 16);
+        data = arena.allocate_bytes (4 * 2 * num, 8); // <float> (num)
+        // window = arena.allocate<float> (num);
+        // idxs = arena.allocate<Idx_Type> (num);
         ptr = num / 2;
         window_size = num;
 
+        auto* window = (float*) data;
+        auto* idxs = (Idx_Type*) data + window_size;
         std::iota (idxs, idxs + window_size, 0);
         std::fill (window, window + num / 2, std::numeric_limits<float>::lowest());
         std::fill (window + num / 2, window + window_size, std::numeric_limits<float>::max());
@@ -101,6 +105,9 @@ struct Median_New
 
     float push_and_return (float x)
     {
+        auto* window = (float*) data;
+        auto* idxs = (Idx_Type*) data + window_size;
+
         auto i = std::distance (idxs, std::find (idxs, idxs + window_size, ptr));
         window[ptr] = x;
 
@@ -126,6 +133,9 @@ struct Median_New
 
     void print_sorted (float x) const
     {
+        auto* window = (float*) data;
+        auto* idxs = (Idx_Type*) data + window_size;
+
         std::cout << x << " " << ptr << " {";
         for (size_t i = 0; i < N; ++i)
         {
@@ -145,7 +155,8 @@ int main()
     {
         auto* mediator = hpss::MediatorNew (arena, N);
         Median_Naive median_naive {};
-        hpss::Median median { arena, N };
+        hpss::Median median {};
+        median.init (arena, N);
 
         std::array<float, M> data { 1.0f, 3.0f, 2.0f, -1.0f, 10.0f, 9.0f, 18.0f, -20.0f, 0.0f, 1.0f };
         std::array<float, M> ref {};
@@ -170,7 +181,8 @@ int main()
     {
         auto* mediator = hpss::MediatorNew (arena, N);
         Median_Naive median_naive {};
-        hpss::Median median { arena, N };
+        hpss::Median median {};
+        median.init (arena, N);
         Median_New median_new { arena, N };
 
         std::vector<float> data {};

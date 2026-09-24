@@ -27,12 +27,10 @@ struct Params
     int window_size = 1 << 11; // integer power of 2
     int hop_factor = 2; // integer power of 2, that divides the window size evenly (usually 1, 2, or 4)
     int zero_pad = 2; // integer power of 2
-    int kernel_size = 17; // size of the median filter kernel, must be odd
+    int harmonic_kernel_size = 17; // frames in the harmonic (time) median, must be odd
+    int percussive_kernel_size = 17; // bins in the percussive (frequency) median, must be odd
     int mask_power = 2; // [0, 16] (usually either one or two)
 };
-
-// Forward declaration
-struct Median;
 
 /** HPSS computation state and pre-computed data. */
 struct HPSS_Processor
@@ -43,7 +41,8 @@ struct HPSS_Processor
     int window_size = 0;
     int hop_size = 0;
     int fft_size = 0;
-    int kernel_size = 0;
+    int harmonic_kernel_size = 0;
+    int percussive_kernel_size = 0;
     int mask_power = 0;
     bool use_squares = false;
 
@@ -57,7 +56,11 @@ struct HPSS_Processor
     int leftover_idx_harm {};
     int leftover_idx_perc {};
 
-    std::span<Median*> horizontal_medians;
+    // One running median per bin, stored as [fft_size / 2 + 1][harmonic_kernel_size].
+    // Every median advances once per frame, so they all share a write position.
+    std::span<float> median_windows {};
+    std::span<int32_t> median_idxs {};
+    int median_ptr {};
 };
 
 using complex = std::complex<float>;
@@ -70,6 +73,12 @@ HPSS_Processor init (Params params);
 
 /** De-initializes an HPSS Processor and frees all allocate memory. */
 void deinit (HPSS_Processor&);
+
+/**
+ * Resets the harmonic medians. Call this after allocating
+ * proc.median_windows and proc.median_idxs yourself, instead of using init().
+ */
+void reset_harmonic_medians (HPSS_Processor& proc);
 
 /**
  * Generates a harmonic and percussive signal for a hop of audio data.
